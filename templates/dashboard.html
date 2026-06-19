@@ -250,6 +250,34 @@ tbody td { padding:11px 14px; vertical-align:middle; }
 }
 .tbl-page-btn:hover:not(:disabled) { border-color:#fc4c02; color:#fc4c02; }
 .tbl-page-btn:disabled { opacity:0.4; cursor:default; }
+
+/* ── ENRICHMENT PROGRESS ── */
+.enrich-bar-wrap {
+  background:#fff; border:1px solid #efefef; border-radius:12px;
+  padding:14px 18px; margin-bottom:16px; display:flex;
+  align-items:center; gap:14px;
+}
+.enrich-bar-track {
+  flex:1; height:6px; background:#f0f0f0; border-radius:4px; overflow:hidden;
+}
+.enrich-bar-fill {
+  height:100%; background:linear-gradient(90deg,#fc4c02,#ff8c42);
+  border-radius:4px; transition:width 0.4s;
+}
+.enrich-status { font-size:12px; color:#bbb; white-space:nowrap; }
+
+/* ── WEATHER CARDS ── */
+.weather-best {
+  display:flex; gap:14px; flex-wrap:wrap; margin-bottom:20px;
+}
+.weather-best-card {
+  flex:1; min-width:200px; background:#fff;
+  border:1px solid #efefef; border-radius:14px; padding:20px 18px;
+}
+.weather-best-card.highlight { border-color:#fc4c02; background:#fff9f7; }
+.wb-label { font-size:11px; font-weight:700; color:#bbb; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
+.wb-value { font-size:22px; font-weight:800; }
+.wb-sub   { font-size:12px; color:#aaa; margin-top:4px; }
 </style>
 </head>
 <body>
@@ -455,6 +483,19 @@ tbody td { padding:11px 14px; vertical-align:middle; }
           </div>
         </div>
       </div>
+      <div class="section-title" style="margin-top:32px">Weather & Performance 🌤️</div>
+
+      <!-- enrichment progress bar — hidden once complete -->
+      <div class="enrich-bar-wrap" id="enrichProgress" style="display:none">
+        <div class="enrich-bar-track"><div class="enrich-bar-fill" id="enrichFill" style="width:0%"></div></div>
+        <span class="enrich-status" id="enrichStatus">Fetching weather data…</span>
+      </div>
+
+      <div id="weatherInsightsArea">
+        <p style="font-size:13px;color:#bbb;padding:20px 0">
+          Weather data loads in the background after your first login. Check back in a minute — no refresh needed, this updates automatically.
+        </p>
+      </div>
     </div>
   </div>
 
@@ -485,20 +526,23 @@ tbody td { padding:11px 14px; vertical-align:middle; }
         <table id="activitiesTable">
           <thead>
             <tr>
-              <th onclick="tblSort('date')"     id="th-date">Date</th>
-              <th onclick="tblSort('name')"     id="th-name">Name</th>
-              <th onclick="tblSort('sport')"    id="th-sport">Sport</th>
-              <th onclick="tblSort('dist_km')"  id="th-dist_km">Distance</th>
-              <th onclick="tblSort('time')"     id="th-time">Time</th>
-              <th onclick="tblSort('pace')"     id="th-pace">Pace</th>
+              <th onclick="tblSort('date')"      id="th-date">Date</th>
+              <th onclick="tblSort('name')"      id="th-name">Name</th>
+              <th onclick="tblSort('sport')"     id="th-sport">Sport</th>
+              <th onclick="tblSort('location')"  id="th-location">Location</th>
+              <th onclick="tblSort('dist_km')"   id="th-dist_km">Distance</th>
+              <th onclick="tblSort('time')"      id="th-time">Time</th>
+              <th onclick="tblSort('pace')"      id="th-pace">Pace</th>
               <th onclick="tblSort('elevation')" id="th-elevation">Elev.</th>
-              <th onclick="tblSort('hr')"       id="th-hr">Avg HR</th>
-              <th onclick="tblSort('calories')" id="th-calories">Kcal</th>
-              <th onclick="tblSort('suffer')"   id="th-suffer">Suffer</th>
+              <th onclick="tblSort('hr')"        id="th-hr">Avg HR</th>
+              <th onclick="tblSort('temp_c')"    id="th-temp_c">Temp</th>
+              <th onclick="tblSort('weather')"   id="th-weather">Weather</th>
+              <th onclick="tblSort('calories')"  id="th-calories">Kcal</th>
+              <th onclick="tblSort('suffer')"    id="th-suffer">Suffer</th>
             </tr>
           </thead>
           <tbody id="tblBody">
-            <tr><td colspan="10" class="tbl-empty">Loading activities…</td></tr>
+            <tr><td colspan="13" class="tbl-empty">Loading activities…</td></tr>
           </tbody>
         </table>
         <div class="tbl-pagination">
@@ -621,6 +665,8 @@ function loadStats(forceRefresh = false) {
       document.getElementById('loading').style.display  = 'none';
       document.getElementById('content').style.display  = 'block';
       render(d);
+      // Start polling for enrichment progress (weather + location)
+      startEnrichmentPolling();
     })
     .catch(() => {
       document.getElementById('loading').innerHTML =
@@ -639,6 +685,133 @@ function refreshData() {
 }
 
 loadStats();
+
+// ── WEATHER ENRICHMENT POLLING ────────────────────────────────────
+let weatherChartT = null;
+let weatherChartC = null;
+let enrichPollTimer = null;
+
+function startEnrichmentPolling() {
+  pollEnrichment();
+}
+
+function pollEnrichment() {
+  fetch('/api/enrichment')
+    .then(r => r.json())
+    .then(d => {
+      const { total, done, complete } = d;
+      if (total === 0) return;
+
+      const pct = Math.round(done / total * 100);
+      const bar  = document.getElementById('enrichProgress');
+      const fill = document.getElementById('enrichFill');
+      const stat = document.getElementById('enrichStatus');
+
+      if (!complete) {
+        bar.style.display = 'flex';
+        fill.style.width  = pct + '%';
+        stat.textContent  = `Fetching weather & locations… ${done}/${total}`;
+        enrichPollTimer = setTimeout(pollEnrichment, 4000);
+      } else {
+        bar.style.display = 'none';
+        // Load and render weather insights
+        loadWeatherInsights();
+        // Reload table if it's already been opened (to get location/weather cols)
+        if (tblAllRows.length > 0) {
+          tblAllRows = [];
+          loadActivitiesTable();
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+function loadWeatherInsights() {
+  fetch('/api/weather-insights')
+    .then(r => r.json())
+    .then(d => {
+      if (!d.runs_with_weather || d.runs_with_weather < 3) return;
+      renderWeatherInsights(d);
+    });
+}
+
+function renderWeatherInsights(d) {
+  const area = document.getElementById('weatherInsightsArea');
+  area.innerHTML = `
+    <div class="weather-best">
+      <div class="weather-best-card highlight">
+        <div class="wb-label">You run fastest in</div>
+        <div class="wb-value">${d.best_temp || '—'}</div>
+        <div class="wb-sub">Best temperature for your pace</div>
+      </div>
+      <div class="weather-best-card highlight">
+        <div class="wb-label">Best weather condition</div>
+        <div class="wb-value">${d.best_cond || '—'}</div>
+        <div class="wb-sub">Lowest average pace in these conditions</div>
+      </div>
+      <div class="weather-best-card">
+        <div class="wb-label">Runs analysed</div>
+        <div class="wb-value">${d.runs_with_weather}</div>
+        <div class="wb-sub">with weather data</div>
+      </div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-card">
+        <div class="chart-title">Pace by Temperature</div>
+        <div class="chart-sub">Lower bar = faster average pace at that temperature</div>
+        <div class="chart-wrap"><canvas id="weatherTempChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Pace by Weather Condition</div>
+        <div class="chart-sub">Lower bar = faster in those conditions</div>
+        <div class="chart-wrap"><canvas id="weatherCondChart"></canvas></div>
+      </div>
+    </div>`;
+
+  if (weatherChartT) weatherChartT.destroy();
+  if (weatherChartC) weatherChartC.destroy();
+
+  weatherChartT = new Chart(document.getElementById('weatherTempChart'), {
+    type: 'bar',
+    data: {
+      labels: d.temp_labels,
+      datasets: [{
+        data: d.temp_values,
+        backgroundColor: d.temp_labels.map(l => l === d.best_temp ? C.orange : C.orange3),
+        borderRadius: 7, borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} min/km avg` } } },
+      scales: {
+        y: { reverse: true, grid: { color: '#f5f5f5' }, ticks: { callback: v => v + ' min/km' } },
+        x: { grid: { display: false } }
+      }
+    }
+  });
+
+  weatherChartC = new Chart(document.getElementById('weatherCondChart'), {
+    type: 'bar',
+    data: {
+      labels: d.cond_labels,
+      datasets: [{
+        data: d.cond_values,
+        backgroundColor: d.cond_labels.map(l => l === d.best_cond ? C.green : '#d4f5ee'),
+        borderRadius: 7, borderSkipped: false,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} min/km avg` } } },
+      scales: {
+        x: { reverse: true, grid: { color: '#f5f5f5' }, ticks: { callback: v => v + ' min/km' } },
+        y: { grid: { display: false } }
+      }
+    }
+  });
+}
 
 // ── ACTIVITIES TABLE ──────────────────────────────────────────────
 let tblAllRows   = [];   // full dataset from /api/activities
@@ -661,7 +834,7 @@ function switchTab(name) {
 
 function loadActivitiesTable() {
   document.getElementById('tblBody').innerHTML =
-    '<tr><td colspan="10" class="tbl-empty">Loading…</td></tr>';
+    '<tr><td colspan="13" class="tbl-empty">Loading…</td></tr>';
   fetch('/api/activities')
     .then(r => r.json())
     .then(rows => {
@@ -670,7 +843,7 @@ function loadActivitiesTable() {
     })
     .catch(() => {
       document.getElementById('tblBody').innerHTML =
-        '<tr><td colspan="10" class="tbl-empty" style="color:#fc4c02">Failed to load activities.</td></tr>';
+        '<tr><td colspan="13" class="tbl-empty" style="color:#fc4c02">Failed to load activities.</td></tr>';
     });
 }
 
@@ -742,7 +915,7 @@ function tblRender() {
 
   if (rows.length === 0) {
     document.getElementById('tblBody').innerHTML =
-      '<tr><td colspan="10" class="tbl-empty">No activities match your filters.</td></tr>';
+      '<tr><td colspan="13" class="tbl-empty">No activities match your filters.</td></tr>';
     return;
   }
 
@@ -751,14 +924,17 @@ function tblRender() {
 
   document.getElementById('tblBody').innerHTML = rows.map(r => `
     <tr>
-      <td style="color:#aaa;font-size:12px">${r.date}</td>
+      <td style="color:#aaa;font-size:12px;white-space:nowrap">${r.date}</td>
       <td><a class="tbl-link tbl-name" href="https://www.strava.com/activities/${r.id}" target="_blank" title="${r.name}">${r.name}</a></td>
       <td><span class="${sportClass(r.sport)}">${SPORT_LABELS[r.sport] || r.sport}</span></td>
+      <td style="font-size:12px;color:#888;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.location || fmt('—')}</td>
       <td>${r.dist_km > 0 ? r.dist_km + ' km' : fmt('—')}</td>
       <td>${fmt(r.time)}</td>
       <td>${fmt(r.pace)}</td>
       <td>${r.elevation > 0 ? r.elevation + ' m' : fmt('—')}</td>
       <td>${fmt(r.hr)}</td>
+      <td style="white-space:nowrap">${r.temp_c !== '' ? r.temp_c + '°C' : fmt('—')}</td>
+      <td style="white-space:nowrap;font-size:13px">${r.weather || fmt('—')}</td>
       <td>${fmt(r.calories)}</td>
       <td>${fmt(r.suffer)}</td>
     </tr>`).join('');

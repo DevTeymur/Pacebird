@@ -2,6 +2,7 @@ import os
 import io
 import json
 import time
+import threading
 import requests
 from dotenv import load_dotenv
 load_dotenv()
@@ -39,6 +40,138 @@ def _save_cache(athlete_id, activities):
             json.dump({"ts": time.time(), "activities": activities}, f)
     except Exception:
         pass
+
+
+# ─── ENRICHMENT CACHE ─────────────────────────────────────────────
+# Stores weather + location per activity ID, permanently.
+# Separate from Strava cache so a Strava refresh doesn't wipe enrichment.
+
+def _enrich_path(athlete_id):
+    return os.path.join(CACHE_DIR, f"enrichment_{athlete_id}.json")
+
+def _load_enrichment(athlete_id):
+    try:
+        with open(_enrich_path(athlete_id)) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_enrichment(athlete_id, data):
+    try:
+        with open(_enrich_path(athlete_id), "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def fetch_weather(lat, lon, date_str):
+    """Fetch historical hourly weather from Open-Meteo for a given date/location."""
+    try:
+        r = requests.get(
+            "https://archive-api.open-meteo.com/v1/archive",
+            params={
+                "latitude":        lat,
+                "longitude":       lon,
+                "start_date":      date_str,
+                "end_date":        date_str,
+                "hourly":          "temperature_2m,precipitation,windspeed_10m,weathercode",
+                "timezone":        "auto",
+            },
+            timeout=8,
+        )
+        d = r.json()
+        hourly = d.get("hourly", {})
+        # Take midday (noon) values as representative
+        idx = 12
+        return {
+            "temp_c":    round(hourly.get("temperature_2m", [None] * 13)[idx] or 0, 1),
+            "precip_mm": round(hourly.get("precipitation",  [None] * 13)[idx] or 0, 1),
+            "wind_kph":  round(hourly.get("windspeed_10m",  [None] * 13)[idx] or 0, 1),
+            "wcode":     hourly.get("weathercode", [None] * 13)[idx],
+        }
+    except Exception:
+        return None
+
+
+def fetch_location(lat, lon):
+    """Reverse geocode via Nominatim (OpenStreetMap). Rate limit: 1 req/sec."""
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"lat": lat, "lon": lon, "format": "json"},
+            headers={"User-Agent": "StravaStatsDashboard/1.0"},
+            timeout=6,
+        )
+        d = r.json()
+        addr = d.get("address", {})
+        city = (addr.get("city") or addr.get("town") or
+                addr.get("village") or addr.get("municipality") or "")
+        country = addr.get("country_code", "").upper()
+        return f"{city}, {country}" if city else country or None
+    except Exception:
+        return None
+
+
+# WMO weather code → human label + emoji
+WMO_LABELS = {
+    0: ("Clear", "☀️"), 1: ("Mostly clear", "🌤️"), 2: ("Partly cloudy", "⛅"),
+    3: ("Overcast", "☁️"), 45: ("Foggy", "🌫️"), 48: ("Foggy", "🌫️"),
+    51: ("Light drizzle", "🌦️"), 53: ("Drizzle", "🌦️"), 55: ("Heavy drizzle", "🌦️"),
+    61: ("Light rain", "🌧️"), 63: ("Rain", "🌧️"), 65: ("Heavy rain", "🌧️"),
+    71: ("Light snow", "❄️"), 73: ("Snow", "❄️"), 75: ("Heavy snow", "❄️"),
+    80: ("Showers", "🌧️"), 81: ("Showers", "🌧️"), 82: ("Heavy showers", "⛈️"),
+    95: ("Thunderstorm", "⛈️"),
+}
+
+def wmo_label(code):
+    if code is None:
+        return ("Unknown", "")
+    return WMO_LABELS.get(int(code), ("Unknown", ""))
+
+
+def enrich_activities_background(athlete_id, activities):
+    """
+    Run in a background thread. For each run with GPS coords:
+    - Fetch weather from Open-Meteo (no rate limit)
+    - Fetch location from Nominatim (1 req/sec)
+    Only processes activities not already enriched.
+    """
+    enrichment = _load_enrichment(athlete_id)
+    runs_with_gps = [
+        a for a in activities
+        if a.get("sport_type") == "Run"
+        and a.get("start_latlng")
+        and len(a["start_latlng"]) == 2
+        and str(a["id"]) not in enrichment
+    ]
+
+    if not runs_with_gps:
+        return
+
+    for a in runs_with_gps:
+        act_id = str(a["id"])
+        lat, lon = a["start_latlng"]
+        date_str = a.get("start_date_local", "")[:10]
+        if not date_str:
+            continue
+
+        entry = {}
+
+        # Weather — no rate limit, fast
+        w = fetch_weather(lat, lon, date_str)
+        if w:
+            entry["weather"] = w
+
+        # Location — 1 req/sec rate limit
+        loc = fetch_location(lat, lon)
+        if loc:
+            entry["location"] = loc
+        time.sleep(1.1)  # respect Nominatim rate limit
+
+        if entry:
+            enrichment[act_id] = entry
+            # Save incrementally so progress isn't lost if interrupted
+            _save_enrichment(athlete_id, enrichment)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "change-this-to-random-string")
@@ -132,13 +265,18 @@ def callback():
     code = request.args.get("code")
     if not code:
         return "Authorization failed.", 400
-    resp = requests.post(STRAVA_TOKEN_URL, data={
-        "client_id":     CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "code":          code,
-        "grant_type":    "authorization_code",
-    })
-    data = resp.json()
+    try:
+        resp = requests.post(STRAVA_TOKEN_URL, data={
+            "client_id":     CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "code":          code,
+            "grant_type":    "authorization_code",
+        }, timeout=10)
+        data = resp.json()
+    except requests.exceptions.Timeout:
+        return "Strava timed out during login. Try again.", 504
+    except Exception as e:
+        return f"Login error: {e}", 500
     if "access_token" not in data:
         return f"Token error: {data}", 400
     session["access_token"]  = data["access_token"]
@@ -185,6 +323,13 @@ def fetch_activities(months=24, force_refresh=False):
 
     if athlete_id:
         _save_cache(athlete_id, activities)
+        # Kick off enrichment in background — doesn't block the response
+        t = threading.Thread(
+            target=enrich_activities_background,
+            args=(athlete_id, activities),
+            daemon=True,
+        )
+        t.start()
 
     return activities
 
@@ -580,17 +725,101 @@ def api_stats():
     return jsonify(stats)
 
 
+@app.route("/api/enrichment")
+def api_enrichment():
+    """Returns enrichment progress + data. Polled by frontend."""
+    if "access_token" not in session:
+        return jsonify({"error": "not authenticated"}), 401
+    athlete_id = session.get("athlete", {}).get("id")
+    activities = fetch_activities(months=24)
+    enrichment = _load_enrichment(athlete_id) if athlete_id else {}
+    runs_with_gps = [a for a in activities
+                     if a.get("sport_type") == "Run" and a.get("start_latlng")]
+    total   = len(runs_with_gps)
+    done    = sum(1 for a in runs_with_gps if str(a["id"]) in enrichment)
+    return jsonify({
+        "total":      total,
+        "done":       done,
+        "complete":   done >= total,
+        "enrichment": enrichment,
+    })
+
+
+@app.route("/api/weather-insights")
+def api_weather_insights():
+    """Compute pace-vs-temperature and pace-vs-condition buckets."""
+    if "access_token" not in session:
+        return jsonify({"error": "not authenticated"}), 401
+    athlete_id = session.get("athlete", {}).get("id")
+    activities = fetch_activities(months=24)
+    enrichment = _load_enrichment(athlete_id) if athlete_id else {}
+    runs = [a for a in activities if a.get("sport_type") == "Run"]
+
+    # Pace vs temperature buckets (<5, 5-10, 10-15, 15-20, 20-25, 25+°C)
+    temp_buckets = {
+        "<5°C":    [], "5–10°C":  [], "10–15°C": [],
+        "15–20°C": [], "20–25°C": [], "25°C+":   [],
+    }
+    # Pace vs condition
+    cond_buckets = defaultdict(list)
+
+    for a in runs:
+        spd = a.get("average_speed", 0)
+        if spd <= 0:
+            continue
+        pace = round(1000 / 60 / spd, 2)
+        e = enrichment.get(str(a["id"]), {})
+        w = e.get("weather")
+        if not w:
+            continue
+        t = w["temp_c"]
+        if   t <  5: temp_buckets["<5°C"].append(pace)
+        elif t < 10: temp_buckets["5–10°C"].append(pace)
+        elif t < 15: temp_buckets["10–15°C"].append(pace)
+        elif t < 20: temp_buckets["15–20°C"].append(pace)
+        elif t < 25: temp_buckets["20–25°C"].append(pace)
+        else:        temp_buckets["25°C+"].append(pace)
+
+        label, _ = wmo_label(w.get("wcode"))
+        cond_buckets[label].append(pace)
+
+    def avg_bucket(b):
+        return {k: round(sum(v)/len(v), 2) for k, v in b.items() if v}
+
+    temp_avgs = avg_bucket(temp_buckets)
+    cond_avgs = avg_bucket(cond_buckets)
+
+    # Best temperature range (lowest = fastest pace)
+    best_temp = min(temp_avgs, key=temp_avgs.get) if temp_avgs else None
+    best_cond = min(cond_avgs, key=cond_avgs.get) if cond_avgs else None
+
+    return jsonify({
+        "temp_labels":  list(temp_avgs.keys()),
+        "temp_values":  list(temp_avgs.values()),
+        "cond_labels":  list(cond_avgs.keys()),
+        "cond_values":  list(cond_avgs.values()),
+        "best_temp":    best_temp,
+        "best_cond":    best_cond,
+        "runs_with_weather": len([a for a in runs if str(a["id"]) in enrichment]),
+    })
+
+
 @app.route("/api/activities")
 def api_activities():
     if "access_token" not in session:
         return jsonify({"error": "not authenticated"}), 401
     force_refresh = request.args.get("refresh") == "1"
-    activities = fetch_activities(months=24, force_refresh=force_refresh)
+    activities  = fetch_activities(months=24, force_refresh=force_refresh)
+    athlete_id  = session.get("athlete", {}).get("id")
+    enrichment  = _load_enrichment(athlete_id) if athlete_id else {}
     rows = []
     for a in activities:
-        spd = a.get("average_speed", 0)
+        spd     = a.get("average_speed", 0)
         dist_km = round(a.get("distance", 0) / 1000, 2)
         moving  = a.get("moving_time", 0)
+        e       = enrichment.get(str(a.get("id")), {})
+        w       = e.get("weather", {})
+        wlabel, wemoji = wmo_label(w.get("wcode")) if w else ("", "")
         rows.append({
             "id":        a.get("id"),
             "name":      a.get("name", ""),
@@ -603,8 +832,10 @@ def api_activities():
             "hr":        a.get("average_heartrate") or "—",
             "calories":  a.get("calories") or "—",
             "suffer":    a.get("suffer_score") or "—",
+            "location":  e.get("location", ""),
+            "temp_c":    w.get("temp_c", ""),
+            "weather":   f"{wemoji} {wlabel}".strip() if wlabel else "",
         })
-    # Sort newest first by default
     rows.sort(key=lambda r: r["date"], reverse=True)
     return jsonify(rows)
 
