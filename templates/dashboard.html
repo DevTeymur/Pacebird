@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard – StravaStats</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f7f8fa; color: #1a1a2e; }
+
+  .header {
+    background: #fff; border-bottom: 1px solid #eee;
+    padding: 20px 48px; display: flex; align-items: center; gap: 14px;
+  }
+  .avatar {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: linear-gradient(135deg,#fc4c02,#ff8c42);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 16px; overflow: hidden;
+  }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .header-name { font-size: 16px; font-weight: 700; }
+  .header-sub  { font-size: 12px; color: #aaa; }
+  .logout {
+    margin-left: auto; font-size: 13px; color: #aaa;
+    text-decoration: none; padding: 8px 14px;
+    border: 1px solid #eee; border-radius: 8px;
+  }
+  .logout:hover { color: #fc4c02; border-color: #fc4c02; }
+
+  /* LOADING */
+  .loading {
+    min-height: 60vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px;
+  }
+  .spinner {
+    width: 40px; height: 40px; border: 3px solid #f0f0f0;
+    border-top-color: #fc4c02; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading p { font-size: 14px; color: #aaa; }
+
+  /* CONTENT */
+  #content { display: none; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+  .section-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: #bbb; margin-bottom: 14px; margin-top: 36px;
+  }
+
+  /* CARDS */
+  .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; }
+  .card {
+    background: #fff; border-radius: 14px; padding: 20px 18px;
+    border: 1px solid #efefef; transition: box-shadow 0.2s;
+  }
+  .card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+  .card-label { font-size: 11px; color: #bbb; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .card-value { font-size: 26px; font-weight: 800; line-height: 1; }
+  .card-sub   { font-size: 11px; color: #ccc; margin-top: 5px; }
+  .c-orange { border-top: 3px solid #fc4c02; }
+  .c-blue   { border-top: 3px solid #3a86ff; }
+  .c-green  { border-top: 3px solid #06d6a0; }
+  .c-purple { border-top: 3px solid #9b5de5; }
+  .c-yellow { border-top: 3px solid #ffd166; }
+
+  /* PR */
+  .pr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 14px; }
+  .pr-card {
+    background: #fff; border-radius: 14px; padding: 22px 18px;
+    border: 1px solid #efefef; position: relative; overflow: hidden;
+    transition: box-shadow 0.2s;
+  }
+  .pr-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+  .pr-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg,#fc4c02,#ff8c42);
+  }
+  .pr-label { font-size: 11px; font-weight: 700; color: #bbb; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+  .pr-time  { font-size: 30px; font-weight: 800; line-height: 1; }
+  .pr-pace  { font-size: 12px; color: #aaa; margin-top: 6px; }
+  .pr-date  { font-size: 11px; color: #ddd; margin-top: 3px; }
+  .pr-badge {
+    position: absolute; top: 14px; right: 12px;
+    background: #fff7f4; color: #fc4c02; font-size: 9px; font-weight: 700;
+    padding: 2px 7px; border-radius: 8px; border: 1px solid #ffd9cc;
+  }
+
+  /* CHARTS */
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 700px) { .chart-grid { grid-template-columns: 1fr; } }
+  .chart-card {
+    background: #fff; border-radius: 14px; padding: 22px;
+    border: 1px solid #efefef;
+  }
+  .chart-card.wide { grid-column: 1 / -1; }
+  .chart-title { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+  .chart-sub   { font-size: 12px; color: #bbb; margin-bottom: 16px; }
+  .chart-wrap  { position: relative; height: 210px; }
+  .chart-wrap.tall { height: 250px; }
+
+  /* HEATMAP */
+  .heatmap-grid { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 6px; }
+  .hm-col { display: flex; flex-direction: column; gap: 3px; }
+  .hm-cell { width: 12px; height: 12px; border-radius: 2px; background: #f0f0f0; cursor: default; }
+  .hm-cell.l1 { background: #ffd0b8; }
+  .hm-cell.l2 { background: #ff8c42; }
+  .hm-cell.l3 { background: #fc4c02; }
+  .hm-cell.l4 { background: #a62b00; }
+  .hm-legend { display: flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 11px; color: #bbb; }
+  .hm-leg-cell { width: 12px; height: 12px; border-radius: 2px; }
+
+  /* FITNESS AGE */
+  .fitness-age-card {
+    background: #1a1a2e; border-radius: 14px; padding: 28px 32px;
+    display: flex; align-items: center; gap: 32px; flex-wrap: wrap;
+  }
+  .fa-score {
+    text-align: center;
+  }
+  .fa-number { font-size: 72px; font-weight: 800; color: #fc4c02; line-height: 1; }
+  .fa-label  { font-size: 12px; color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .fa-details { flex: 1; min-width: 200px; }
+  .fa-details h3 { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .fa-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a2a4e; font-size: 13px; }
+  .fa-row:last-child { border-bottom: none; }
+  .fa-row span:first-child { color: #888; }
+  .fa-row span:last-child  { color: #fff; font-weight: 600; }
+  .fa-younger { color: #06d6a0 !important; }
+  .fa-older   { color: #ff5050 !important; }
+  .fa-birth-form { display: flex; gap: 8px; margin-top: 16px; }
+  .fa-birth-form input {
+    flex: 1; padding: 10px 14px; border-radius: 8px;
+    border: 1px solid #2a2a4e; background: #2a2a4e; color: #fff;
+    font-size: 14px; outline: none;
+  }
+  .fa-birth-form button {
+    padding: 10px 18px; border-radius: 8px; border: none;
+    background: #fc4c02; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+
+  /* SWEET SPOT */
+  .sweet-wrap { position: relative; }
+  .sweet-badge {
+    display: inline-block; background: #fc4c02; color: #fff;
+    font-size: 11px; font-weight: 700; padding: 3px 10px;
+    border-radius: 10px; margin-left: 8px; vertical-align: middle;
+  }
+
+  /* SHAREABLE CARD */
+  .share-section {
+    background: linear-gradient(135deg, #1a1a2e, #2a1a3e);
+    border-radius: 16px; padding: 36px;
+    display: flex; align-items: center; gap: 32px; flex-wrap: wrap;
+  }
+  .share-preview {
+    width: 200px; height: 200px; border-radius: 12px;
+    background: linear-gradient(135deg, #fc4c02, #ff8c42);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #fff; font-size: 13px; font-weight: 600; gap: 8px; flex-shrink: 0;
+  }
+  .share-preview .big { font-size: 40px; }
+  .share-text h3 { font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 8px; }
+  .share-text p  { font-size: 13px; color: #888; line-height: 1.6; margin-bottom: 20px; }
+  .share-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #fc4c02; color: #fff; font-size: 14px; font-weight: 700;
+    padding: 14px 28px; border-radius: 10px; text-decoration: none;
+    border: none; cursor: pointer; transition: background 0.2s;
+  }
+  .share-btn:hover { background: #e04400; }
+  .share-btn-loading { opacity: 0.7; pointer-events: none; }
+
+  /* PREDICTOR */
+  .predictor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+  .pred-card {
+    background: #fff; border-radius: 14px; padding: 20px 18px;
+    border: 1px solid #efefef; text-align: center;
+  }
+  .pred-dist { font-size: 12px; font-weight: 700; color: #bbb; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .pred-time { font-size: 24px; font-weight: 800; color: #fc4c02; }
+  .pred-note { font-size: 11px; color: #ddd; margin-top: 4px; }
+
+  /* TOD */
+  .tod-best {
+    background: linear-gradient(135deg, #fc4c02, #ff8c42);
+    color: #fff; border-radius: 14px; padding: 20px 24px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .tod-icon { font-size: 36px; }
+  .tod-label { font-size: 12px; font-weight: 600; opacity: 0.8; margin-bottom: 4px; }
+  .tod-value { font-size: 22px; font-weight: 800; }
+  .tod-sub   { font-size: 12px; opacity: 0.7; margin-top: 2px; }
+
+  .footer { text-align: center; padding: 36px; font-size: 12px; color: #ddd; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="avatar" id="athleteAvatar">
+    {{ athlete.get('firstname', '?')[0] }}
+  </div>
+  <div>
+    <div class="header-name" id="athleteName">
+      {{ athlete.get('firstname', '') }} {{ athlete.get('lastname', '') }}
+    </div>
+    <div class="header-sub" id="athleteLocation">
+      {{ athlete.get('city', '') }}{% if athlete.get('country') %}, {{ athlete.get('country') }}{% endif %}
+    </div>
+  </div>
+  <a href="/logout" class="logout">Sign out</a>
+</div>
+
+<!-- LOADING STATE -->
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <p>Fetching your Strava data…</p>
+</div>
+
+<!-- DASHBOARD -->
+<div id="content">
+<div class="container">
+
+  <div class="section-title">Overview</div>
+  <div class="cards-grid">
+    <div class="card c-orange">
+      <div class="card-label">Total Runs</div>
+      <div class="card-value" id="totalRuns">—</div>
+      <div class="card-sub">last 24 months</div>
+    </div>
+    <div class="card c-orange">
+      <div class="card-label">Total Distance</div>
+      <div class="card-value" id="totalKm">—</div>
+      <div class="card-sub">kilometres run</div>
+    </div>
+    <div class="card c-blue">
+      <div class="card-label">Gym Sessions</div>
+      <div class="card-value" id="totalGym">—</div>
+      <div class="card-sub">weight training</div>
+    </div>
+    <div class="card c-green">
+      <div class="card-label">Pace Improved</div>
+      <div class="card-value" id="paceImprove">—</div>
+      <div class="card-sub">min/km faster</div>
+    </div>
+    <div class="card c-purple">
+      <div class="card-label">Longest Run</div>
+      <div class="card-value" id="longestRun">—</div>
+      <div class="card-sub">kilometres</div>
+    </div>
+    <div class="card c-yellow">
+      <div class="card-label">Squash / Racket</div>
+      <div class="card-value" id="totalSquash">—</div>
+      <div class="card-sub">sessions</div>
+    </div>
+  </div>
+
+  <div class="section-title">Personal Records 🏆</div>
+  <div class="pr-grid" id="prGrid">
+    <!-- filled by JS -->
+  </div>
+
+  <div class="section-title">Race Time Predictor 🔮</div>
+  <div class="predictor-grid" id="predictorGrid">
+    <!-- filled by JS -->
+  </div>
+
+  <div class="section-title">Running Analytics</div>
+  <div class="chart-grid">
+    <div class="chart-card wide">
+      <div class="chart-title">Monthly Running Distance (km)</div>
+      <div class="chart-sub">How many kilometres you ran each month</div>
+      <div class="chart-wrap tall"><canvas id="monthlyChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Pace Over Time</div>
+      <div class="chart-sub">min/km per run — downward trend = getting faster</div>
+      <div class="chart-wrap"><canvas id="paceChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Run Distance Distribution</div>
+      <div class="chart-sub">How often you run each distance range</div>
+      <div class="chart-wrap"><canvas id="distChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Weekly Training Load</div>
+      <div class="chart-sub">Combined effort across all sports, last 12 weeks</div>
+      <div class="chart-wrap"><canvas id="weeklyChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Activity Mix</div>
+      <div class="chart-sub">Sessions by sport type</div>
+      <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Calories Burned per Hour by Sport</div>
+      <div class="chart-sub">Based on your actual logged data</div>
+      <div class="chart-wrap"><canvas id="calChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="section-title">Best Time of Day to Train</div>
+  <div class="chart-grid">
+    <div id="todBest" class="tod-best" style="grid-column: 1 / -1; display:none;">
+      <div class="tod-icon">⏰</div>
+      <div>
+        <div class="tod-label">YOU PERFORM BEST IN THE</div>
+        <div class="tod-value" id="todBestLabel">—</div>
+        <div class="tod-sub" id="todBestSub">—</div>
+      </div>
+    </div>
+    <div class="chart-card wide">
+      <div class="chart-title">Average Pace by Time of Day</div>
+      <div class="chart-sub">Lower bar = faster pace. Find your peak performance window.</div>
+      <div class="chart-wrap"><canvas id="todChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- FITNESS AGE -->
+  <div class="section-title">Fitness Age Score 🧬</div>
+  <div id="fitnessAgeSection">
+    <div class="fitness-age-card" id="fitnessAgeCard">
+      <div class="fa-score">
+        <div class="fa-number" id="faNumber">—</div>
+        <div class="fa-label">Fitness Age</div>
+      </div>
+      <div class="fa-details">
+        <h3 id="faHeadline">Calculating your fitness age…</h3>
+        <div class="fa-row"><span>Actual Age</span><span id="faActual">—</span></div>
+        <div class="fa-row"><span>Estimated VO₂max</span><span id="faVo2">—</span></div>
+        <div class="fa-row"><span>Difference</span><span id="faDiff">—</span></div>
+        <div class="fa-birth-form" id="faBirthForm" style="display:none">
+          <input type="number" id="birthYearInput" placeholder="Your birth year e.g. 1997" min="1940" max="2005" />
+          <button onclick="submitBirthYear()">Calculate</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TRAINING SWEET SPOT -->
+  <div class="section-title">Training Load Sweet Spot 🎯</div>
+  <div class="chart-card">
+    <div class="chart-title">
+      How Last Week's Load Affects Your Running Pace
+      <span class="sweet-badge" id="sweetBadge" style="display:none">Your sweet spot</span>
+    </div>
+    <div class="chart-sub">The zone where you trained hardest but still ran fastest — that's your optimal load.</div>
+    <div class="chart-wrap"><canvas id="sweetChart"></canvas></div>
+  </div>
+
+  <!-- SHAREABLE CARD -->
+  <div class="section-title">Share Your Stats 📲</div>
+  <div class="share-section">
+    <div class="share-preview">
+      <div class="big">⚡</div>
+      <div>Your Stats Card</div>
+      <div style="font-size:11px;opacity:0.7">1080 × 1080 PNG</div>
+    </div>
+    <div class="share-text">
+      <h3>Download Your Stats Card</h3>
+      <p>A beautiful 1080×1080 image with your PRs, total distance, fitness age, and pace improvement. Save it and post it anywhere.</p>
+      <button class="share-btn" id="downloadBtn" onclick="downloadCard()">
+        ⬇ Download My Card
+      </button>
+    </div>
+  </div>
+
+  <div class="section-title">Consistency Heatmap – Last 52 Weeks</div>
+  <div class="chart-card">
+    <div class="chart-title">Run Days</div>
+    <div class="chart-sub">Each cell = one week · darker = more km run</div>
+    <div style="margin-top:14px;">
+      <div class="heatmap-grid" id="heatmapGrid"></div>
+      <div class="hm-legend">
+        <span>Less</span>
+        <div class="hm-leg-cell" style="background:#f0f0f0"></div>
+        <div class="hm-leg-cell" style="background:#ffd0b8"></div>
+        <div class="hm-leg-cell" style="background:#ff8c42"></div>
+        <div class="hm-leg-cell" style="background:#fc4c02"></div>
+        <div class="hm-leg-cell" style="background:#a62b00"></div>
+        <span>More (20km+)</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div><!-- /content -->
+
+<div class="footer">StravaStats · Read-only access · We never post to your Strava</div>
+
+<script>
+Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+Chart.defaults.color = '#999';
+
+const COLORS = {
+  orange: '#fc4c02', orange2: '#ff8c42', orange3: '#ffd0b8',
+  blue: '#3a86ff', green: '#06d6a0', purple: '#9b5de5', yellow: '#ffd166',
+};
+
+function barColors(values, hi='#fc4c02', mid='#ff8c42', lo='#ffd0b8') {
+  const max = Math.max(...values);
+  return values.map(v => v >= max * 0.8 ? hi : v >= max * 0.4 ? mid : lo);
+}
+
+// ── FITNESS AGE RENDERER ──────────────────────────────────────────
+function renderFitnessAge(fa) {
+  if (!fa) {
+    document.getElementById('faHeadline').textContent = 'Enter your birth year to calculate';
+    document.getElementById('faBirthForm').style.display = 'flex';
+    document.getElementById('faNumber').textContent = '?';
+    return;
+  }
+  document.getElementById('faBirthForm').style.display = 'none';
+  document.getElementById('faNumber').textContent = fa.fitness_age;
+  document.getElementById('faActual').textContent = fa.actual_age + ' yrs';
+  document.getElementById('faVo2').textContent = fa.vo2max + ' ml/kg/min';
+  const diff = fa.difference;
+  const diffEl = document.getElementById('faDiff');
+  if (diff > 0) {
+    diffEl.textContent = `${diff} years younger than real age`;
+    diffEl.className = 'fa-younger';
+    document.getElementById('faHeadline').textContent =
+      `You're ${diff} year${diff !== 1 ? 's' : ''} fitter than your age 💪`;
+  } else if (diff < 0) {
+    diffEl.textContent = `${Math.abs(diff)} years older than real age`;
+    diffEl.className = 'fa-older';
+    document.getElementById('faHeadline').textContent =
+      `Room to grow — keep building that base`;
+  } else {
+    diffEl.textContent = 'Exactly your age';
+    document.getElementById('faHeadline').textContent = 'Right on track with your age group';
+  }
+}
+
+// ── BIRTH YEAR SUBMIT ─────────────────────────────────────────────
+function submitBirthYear() {
+  const yr = document.getElementById('birthYearInput').value;
+  if (!yr || yr < 1940 || yr > 2005) return alert('Enter a valid birth year');
+  fetch(`/api/stats?birth_year=${yr}`)
+    .then(r => r.json())
+    .then(d => { renderFitnessAge(d.fitness_age); });
+}
+
+// ── DOWNLOAD CARD ─────────────────────────────────────────────────
+function downloadCard() {
+  const btn = document.getElementById('downloadBtn');
+  btn.classList.add('share-btn-loading');
+  btn.textContent = '⏳ Generating…';
+  window.location.href = '/api/card';
+  setTimeout(() => {
+    btn.classList.remove('share-btn-loading');
+    btn.innerHTML = '⬇ Download My Card';
+  }, 3000);
+}
+
+// ── FETCH & RENDER ────────────────────────────────────────────────
+fetch('/api/stats')
+  .then(r => r.json())
+  .then(d => {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+    render(d);
+  })
+  .catch(() => {
+    document.getElementById('loading').innerHTML =
+      '<p style="color:#fc4c02">Failed to load data. <a href="/">Try again</a></p>';
+  });
+
+function render(d) {
+  // ── OVERVIEW CARDS ──────────────────────────────────────────────
+  document.getElementById('totalRuns').textContent   = d.total_runs;
+  document.getElementById('totalKm').textContent     = d.total_run_km + ' km';
+  document.getElementById('totalGym').textContent    = d.total_gym;
+  document.getElementById('longestRun').textContent  = d.longest_run + ' km';
+  document.getElementById('totalSquash').textContent = d.total_squash;
+  if (d.pace_improvement !== null && d.pace_improvement > 0) {
+    document.getElementById('paceImprove').textContent = '+' + d.pace_improvement;
+    document.getElementById('paceImprove').style.color = '#06d6a0';
+  } else {
+    document.getElementById('paceImprove').textContent = d.pace_improvement || '—';
+  }
+
+  // ── PRs ──────────────────────────────────────────────────────────
+  const prGrid = document.getElementById('prGrid');
+  const prOrder = ['1K','5K','10K','15K','HM'];
+  const prNames = {'1K':'1 km','5K':'5 km','10K':'10 km','15K':'15 km','HM':'Half Marathon'};
+  prOrder.forEach(key => {
+    const pr = d.prs[key];
+    if (!pr) return;
+    prGrid.innerHTML += `
+      <div class="pr-card">
+        <div class="pr-badge">PR</div>
+        <div class="pr-label">${prNames[key]}</div>
+        <div class="pr-time">${pr.display}</div>
+        <div class="pr-pace">${pr.pace} /km</div>
+        <div class="pr-date">${pr.date} · ${pr.name}</div>
+      </div>`;
+  });
+
+  // ── PREDICTOR ────────────────────────────────────────────────────
+  const predGrid = document.getElementById('predictorGrid');
+  if (Object.keys(d.predictor).length > 0) {
+    const notes = { '10K': 'Based on your 5K PR', 'HM': 'Riegel formula', 'Marathon': 'Riegel formula' };
+    Object.entries(d.predictor).forEach(([dist, time]) => {
+      predGrid.innerHTML += `
+        <div class="pred-card">
+          <div class="pred-dist">${dist}</div>
+          <div class="pred-time">${time}</div>
+          <div class="pred-note">${notes[dist] || ''}</div>
+        </div>`;
+    });
+  } else {
+    predGrid.innerHTML = '<p style="color:#bbb;font-size:13px">Not enough run data yet for predictions.</p>';
+  }
+
+  // ── MONTHLY CHART ────────────────────────────────────────────────
+  new Chart(document.getElementById('monthlyChart'), {
+    type: 'bar',
+    data: {
+      labels: d.monthly_labels,
+      datasets: [{ data: d.monthly_values, backgroundColor: barColors(d.monthly_values), borderRadius: 7, borderSkipped: false }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} km` } } },
+      scales: { y: { grid: { color: '#f5f5f5' }, ticks: { callback: v => v+'km' } }, x: { grid: { display: false } } }
+    }
+  });
+
+  // ── PACE CHART ───────────────────────────────────────────────────
+  if (d.pace_values.length > 0) {
+    new Chart(document.getElementById('paceChart'), {
+      type: 'line',
+      data: {
+        labels: d.pace_labels,
+        datasets: [{ data: d.pace_values, borderColor: COLORS.orange, backgroundColor: 'rgba(252,76,2,0.07)',
+          borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: COLORS.orange, fill: true, tension: 0.4 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} min/km` } } },
+        scales: {
+          y: { reverse: true, grid: { color: '#f5f5f5' }, ticks: { callback: v => v+' min/km' } },
+          x: { grid: { display: false }, ticks: { maxRotation: 45, maxTicksLimit: 8, font: { size: 10 } } }
+        }
+      }
+    });
+  }
+
+  // ── DISTANCE DIST ────────────────────────────────────────────────
+  const distLabels = Object.keys(d.dist_buckets);
+  const distVals   = Object.values(d.dist_buckets);
+  new Chart(document.getElementById('distChart'), {
+    type: 'bar',
+    data: {
+      labels: distLabels,
+      datasets: [{ data: distVals,
+        backgroundColor: ['#ffd0b8','#ffb890','#ff8c42','#fc4c02','#d93900','#a62b00'],
+        borderRadius: 6, borderSkipped: false }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} runs` } } },
+      scales: { y: { grid: { color: '#f5f5f5' }, ticks: { stepSize: 1 } }, x: { grid: { display: false } } }
+    }
+  });
+
+  // ── WEEKLY LOAD ──────────────────────────────────────────────────
+  if (d.week_values.length > 0) {
+    new Chart(document.getElementById('weeklyChart'), {
+      type: 'bar',
+      data: {
+        labels: d.week_labels,
+        datasets: [{ data: d.week_values, backgroundColor: barColors(d.week_values), borderRadius: 6, borderSkipped: false }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` Effort: ${c.raw}` } } },
+        scales: { y: { grid: { color: '#f5f5f5' } }, x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } } }
+      }
+    });
+  }
+
+  // ── PIE ──────────────────────────────────────────────────────────
+  const pieColors = [COLORS.orange, COLORS.blue, COLORS.green, COLORS.purple, COLORS.yellow, '#aaa'];
+  new Chart(document.getElementById('pieChart'), {
+    type: 'doughnut',
+    data: {
+      labels: d.sport_counts.map(s => s.sport),
+      datasets: [{ data: d.sport_counts.map(s => s.count), backgroundColor: pieColors, borderWidth: 0, hoverOffset: 8 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '62%',
+      plugins: {
+        legend: { position: 'right', labels: { boxWidth: 11, padding: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: c => ` ${c.label}: ${c.raw} sessions` } }
+      }
+    }
+  });
+
+  // ── CALORIE BY SPORT ─────────────────────────────────────────────
+  if (d.cal_labels.length > 0) {
+    new Chart(document.getElementById('calChart'), {
+      type: 'bar',
+      data: {
+        labels: d.cal_labels,
+        datasets: [{ data: d.cal_values, backgroundColor: barColors(d.cal_values), borderRadius: 6, borderSkipped: false }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} kcal/hr` } } },
+        scales: { x: { grid: { color: '#f5f5f5' }, ticks: { callback: v => v+' kcal' } }, y: { grid: { display: false } } }
+      }
+    });
+  }
+
+  // ── TIME OF DAY ──────────────────────────────────────────────────
+  if (d.tod_values.length > 0) {
+    // find best (lowest pace)
+    const minPace = Math.min(...d.tod_values);
+    const bestIdx = d.tod_values.indexOf(minPace);
+    const todEl = document.getElementById('todBest');
+    todEl.style.display = 'flex';
+    document.getElementById('todBestLabel').textContent = d.tod_labels[bestIdx];
+    document.getElementById('todBestSub').textContent = `Your avg pace is ${minPace} min/km in this slot`;
+
+    new Chart(document.getElementById('todChart'), {
+      type: 'bar',
+      data: {
+        labels: d.tod_labels,
+        datasets: [{
+          data: d.tod_values,
+          backgroundColor: d.tod_values.map((v, i) => i === bestIdx ? COLORS.orange : COLORS.orange3),
+          borderRadius: 8, borderSkipped: false,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} min/km avg` } } },
+        scales: {
+          y: { reverse: true, grid: { color: '#f5f5f5' }, ticks: { callback: v => v+' min/km' } },
+          x: { grid: { display: false } }
+        }
+      }
+    });
+  }
+
+  // ── FITNESS AGE ──────────────────────────────────────────────────
+  renderFitnessAge(d.fitness_age);
+
+  // ── SWEET SPOT ───────────────────────────────────────────────────
+  if (d.sweet_labels && d.sweet_labels.length > 0) {
+    const sweetColors = d.sweet_labels.map(l =>
+      l === d.sweet_spot ? COLORS.orange : COLORS.orange3);
+    new Chart(document.getElementById('sweetChart'), {
+      type: 'bar',
+      data: {
+        labels: d.sweet_labels,
+        datasets: [{
+          label: 'Avg pace after this load',
+          data: d.sweet_values,
+          backgroundColor: sweetColors,
+          borderRadius: 8, borderSkipped: false,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: {
+            label: c => ` ${c.raw} min/km (${d.sweet_counts[c.dataIndex]} runs)`,
+          }}
+        },
+        scales: {
+          y: { reverse: true, grid: { color: '#f5f5f5' },
+               ticks: { callback: v => v + ' min/km' },
+               title: { display: true, text: '← faster', color: '#06d6a0', font: { size: 11 } } },
+          x: { grid: { display: false } }
+        }
+      }
+    });
+    if (d.sweet_spot) {
+      const badge = document.getElementById('sweetBadge');
+      badge.style.display = 'inline-block';
+      badge.textContent = `Sweet spot: ${d.sweet_spot.replace('\n', ' ')}`;
+    }
+  }
+
+  // ── HEATMAP ──────────────────────────────────────────────────────
+  const grid = document.getElementById('heatmapGrid');
+  const weeks = d.heatmap;
+  const weeksPerCol = 7;
+  const cols = Math.ceil(weeks.length / weeksPerCol);
+  for (let c = 0; c < cols; c++) {
+    const col = document.createElement('div');
+    col.className = 'hm-col';
+    for (let r = 0; r < weeksPerCol; r++) {
+      const idx = c * weeksPerCol + r;
+      if (idx >= weeks.length) break;
+      const km = weeks[idx];
+      const cell = document.createElement('div');
+      let cls = 'hm-cell';
+      if (km > 20) cls += ' l4';
+      else if (km > 15) cls += ' l3';
+      else if (km > 5)  cls += ' l2';
+      else if (km > 0)  cls += ' l1';
+      cell.className = cls;
+      cell.title = km > 0 ? `${km} km` : 'No run';
+      col.appendChild(cell);
+    }
+    grid.appendChild(col);
+  }
+}
+</script>
+</body>
+</html>
