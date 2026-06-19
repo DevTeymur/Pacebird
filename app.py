@@ -14,7 +14,8 @@ from PIL import Image, ImageDraw, ImageFont
 # Stores fetched activities on disk per athlete, avoids re-fetching
 # every page load. Cache expires after CACHE_TTL seconds.
 CACHE_DIR = os.path.join(os.path.dirname(__file__), ".cache")
-CACHE_TTL = 3600  # 1 hour — change to 300 for 5 min during dev
+# Cache is permanent — only cleared by explicit ?refresh=1 from the user.
+# This keeps Strava API requests minimal.
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -28,11 +29,9 @@ def _load_cache(athlete_id):
     try:
         with open(path) as f:
             data = json.load(f)
-        if time.time() - data["ts"] < CACHE_TTL:
-            return data["activities"]
+        return data.get("activities")
     except Exception:
-        pass
-    return None
+        return None
 
 def _save_cache(athlete_id, activities):
     try:
@@ -579,6 +578,35 @@ def api_stats():
     activities = fetch_activities(months=24, force_refresh=force_refresh)
     stats = compute_stats(activities)
     return jsonify(stats)
+
+
+@app.route("/api/activities")
+def api_activities():
+    if "access_token" not in session:
+        return jsonify({"error": "not authenticated"}), 401
+    force_refresh = request.args.get("refresh") == "1"
+    activities = fetch_activities(months=24, force_refresh=force_refresh)
+    rows = []
+    for a in activities:
+        spd = a.get("average_speed", 0)
+        dist_km = round(a.get("distance", 0) / 1000, 2)
+        moving  = a.get("moving_time", 0)
+        rows.append({
+            "id":        a.get("id"),
+            "name":      a.get("name", ""),
+            "sport":     a.get("sport_type", ""),
+            "date":      a.get("start_date_local", "")[:10],
+            "dist_km":   dist_km,
+            "time":      seconds_to_time(moving) if moving else "—",
+            "pace":      speed_to_pace(spd) if spd > 0 else "—",
+            "elevation": a.get("total_elevation_gain", 0),
+            "hr":        a.get("average_heartrate") or "—",
+            "calories":  a.get("calories") or "—",
+            "suffer":    a.get("suffer_score") or "—",
+        })
+    # Sort newest first by default
+    rows.sort(key=lambda r: r["date"], reverse=True)
+    return jsonify(rows)
 
 
 @app.route("/api/card")

@@ -195,6 +195,61 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 .share-loading { opacity:0.7; pointer-events:none; }
 
 .footer { text-align:center; padding:32px; font-size:12px; color:#ddd; }
+
+/* ── ACTIVITIES TABLE ── */
+.tbl-toolbar {
+  display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+  margin-bottom:16px;
+}
+.tbl-search {
+  flex:1; min-width:180px; padding:9px 14px;
+  border:1px solid #e8e8e8; border-radius:8px;
+  font-size:13px; outline:none; background:#fff;
+}
+.tbl-search:focus { border-color:#fc4c02; }
+.tbl-select {
+  padding:9px 12px; border:1px solid #e8e8e8; border-radius:8px;
+  font-size:13px; background:#fff; outline:none; cursor:pointer;
+}
+.tbl-select:focus { border-color:#fc4c02; }
+.tbl-count { font-size:12px; color:#bbb; margin-left:auto; white-space:nowrap; }
+.tbl-wrap { overflow-x:auto; border-radius:12px; border:1px solid #efefef; background:#fff; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+thead th {
+  padding:11px 14px; text-align:left; font-size:11px; font-weight:700;
+  text-transform:uppercase; letter-spacing:0.5px; color:#bbb;
+  background:#fafafa; border-bottom:1px solid #f0f0f0;
+  cursor:pointer; user-select:none; white-space:nowrap;
+}
+thead th:hover { color:#1a1a2e; }
+thead th.sort-asc::after  { content:' ↑'; color:#fc4c02; }
+thead th.sort-desc::after { content:' ↓'; color:#fc4c02; }
+tbody tr { border-bottom:1px solid #f8f8f8; transition:background 0.1s; }
+tbody tr:last-child { border-bottom:none; }
+tbody tr:hover { background:#fffaf8; }
+tbody td { padding:11px 14px; vertical-align:middle; }
+.sport-badge {
+  display:inline-block; padding:2px 9px; border-radius:8px;
+  font-size:11px; font-weight:700; white-space:nowrap;
+}
+.sport-Run          { background:#fff0eb; color:#fc4c02; }
+.sport-WeightTraining { background:#eef4ff; color:#3a86ff; }
+.sport-Squash       { background:#eefffa; color:#06d6a0; }
+.sport-Ride         { background:#f5eeff; color:#9b5de5; }
+.sport-Other        { background:#f5f5f5; color:#999; }
+.tbl-name { font-weight:600; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tbl-link { color:inherit; text-decoration:none; }
+.tbl-link:hover { color:#fc4c02; }
+.tbl-empty { text-align:center; padding:48px; color:#bbb; font-size:14px; }
+.tbl-pagination { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-top:1px solid #f0f0f0; background:#fafafa; border-radius:0 0 12px 12px; }
+.tbl-page-info { font-size:12px; color:#bbb; }
+.tbl-page-btns { display:flex; gap:6px; }
+.tbl-page-btn {
+  padding:5px 12px; border-radius:6px; border:1px solid #e8e8e8;
+  font-size:12px; background:#fff; cursor:pointer; color:#666;
+}
+.tbl-page-btn:hover:not(:disabled) { border-color:#fc4c02; color:#fc4c02; }
+.tbl-page-btn:disabled { opacity:0.4; cursor:default; }
 </style>
 </head>
 <body>
@@ -218,6 +273,7 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
   <button class="tab-btn" onclick="switchTab('running')">🏃 Running</button>
   <button class="tab-btn" onclick="switchTab('training')">💪 Training Load</button>
   <button class="tab-btn" onclick="switchTab('insights')">🧬 Insights</button>
+  <button class="tab-btn" onclick="switchTab('activities')">📋 All Activities</button>
   <button class="tab-btn" onclick="switchTab('share')">📲 Share Card</button>
 </div>
 
@@ -402,6 +458,60 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
     </div>
   </div>
 
+  <!-- ══ TAB: ALL ACTIVITIES ══ -->
+  <div class="tab-panel" id="tab-activities">
+    <div class="container">
+      <div class="section-title">All Activities</div>
+      <div class="tbl-toolbar">
+        <input  class="tbl-search" id="tblSearch"      type="text"    placeholder="Search by name…" oninput="tblFilter()">
+        <select class="tbl-select" id="tblSport"        onchange="tblFilter()">
+          <option value="">All sports</option>
+          <option value="Run">Running</option>
+          <option value="WeightTraining">Gym</option>
+          <option value="Squash">Squash</option>
+          <option value="Ride">Cycling</option>
+        </select>
+        <select class="tbl-select" id="tblPeriod" onchange="tblFilter()">
+          <option value="">All time</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 3 months</option>
+          <option value="180">Last 6 months</option>
+          <option value="365">Last 12 months</option>
+        </select>
+        <span class="tbl-count" id="tblCount"></span>
+      </div>
+      <div class="tbl-wrap">
+        <table id="activitiesTable">
+          <thead>
+            <tr>
+              <th onclick="tblSort('date')"     id="th-date">Date</th>
+              <th onclick="tblSort('name')"     id="th-name">Name</th>
+              <th onclick="tblSort('sport')"    id="th-sport">Sport</th>
+              <th onclick="tblSort('dist_km')"  id="th-dist_km">Distance</th>
+              <th onclick="tblSort('time')"     id="th-time">Time</th>
+              <th onclick="tblSort('pace')"     id="th-pace">Pace</th>
+              <th onclick="tblSort('elevation')" id="th-elevation">Elev.</th>
+              <th onclick="tblSort('hr')"       id="th-hr">Avg HR</th>
+              <th onclick="tblSort('calories')" id="th-calories">Kcal</th>
+              <th onclick="tblSort('suffer')"   id="th-suffer">Suffer</th>
+            </tr>
+          </thead>
+          <tbody id="tblBody">
+            <tr><td colspan="10" class="tbl-empty">Loading activities…</td></tr>
+          </tbody>
+        </table>
+        <div class="tbl-pagination">
+          <span class="tbl-page-info" id="tblPageInfo"></span>
+          <div class="tbl-page-btns">
+            <button class="tbl-page-btn" id="tblPrev" onclick="tblPage(-1)">← Prev</button>
+            <button class="tbl-page-btn" id="tblNext" onclick="tblPage(+1)">Next →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ══ TAB: SHARE ══ -->
   <div class="tab-panel" id="tab-share">
     <div class="container">
@@ -431,14 +541,6 @@ const C = {
   orange:'#fc4c02', orange2:'#ff8c42', orange3:'#ffd0b8',
   blue:'#3a86ff', green:'#06d6a0', purple:'#9b5de5', yellow:'#ffd166',
 };
-
-// ── TAB SWITCHING ─────────────────────────────────────────────────
-function switchTab(name) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
-  document.getElementById(`tab-${name}`).classList.add('active');
-}
 
 // ── FITNESS AGE ───────────────────────────────────────────────────
 function renderFitnessAge(fa) {
@@ -537,6 +639,130 @@ function refreshData() {
 }
 
 loadStats();
+
+// ── ACTIVITIES TABLE ──────────────────────────────────────────────
+let tblAllRows   = [];   // full dataset from /api/activities
+let tblFiltered  = [];   // after search/filter
+let tblSortKey   = 'date';
+let tblSortDir   = -1;   // -1 = desc, 1 = asc
+let tblPage      = 0;
+const TBL_PER_PAGE = 25;
+
+// Lazy-load — only fetch when user opens the tab
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById(`tab-${name}`).classList.add('active');
+  if (name === 'activities' && tblAllRows.length === 0) {
+    loadActivitiesTable();
+  }
+}
+
+function loadActivitiesTable() {
+  document.getElementById('tblBody').innerHTML =
+    '<tr><td colspan="10" class="tbl-empty">Loading…</td></tr>';
+  fetch('/api/activities')
+    .then(r => r.json())
+    .then(rows => {
+      tblAllRows = rows;
+      tblFilter();
+    })
+    .catch(() => {
+      document.getElementById('tblBody').innerHTML =
+        '<tr><td colspan="10" class="tbl-empty" style="color:#fc4c02">Failed to load activities.</td></tr>';
+    });
+}
+
+function tblFilter() {
+  const q      = document.getElementById('tblSearch').value.toLowerCase();
+  const sport  = document.getElementById('tblSport').value;
+  const period = parseInt(document.getElementById('tblPeriod').value) || 0;
+  const cutoff = period ? new Date(Date.now() - period * 864e5).toISOString().slice(0,10) : null;
+
+  tblFiltered = tblAllRows.filter(r => {
+    if (sport  && r.sport !== sport) return false;
+    if (cutoff && r.date < cutoff)   return false;
+    if (q && !r.name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  tblPageCurrent = 0;
+  tblRender();
+}
+
+let tblPageCurrent = 0;
+
+function tblSort(key) {
+  if (tblSortKey === key) { tblSortDir *= -1; }
+  else { tblSortKey = key; tblSortDir = -1; }
+  // Update header indicators
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+  });
+  const th = document.getElementById(`th-${key}`);
+  if (th) th.classList.add(tblSortDir === 1 ? 'sort-asc' : 'sort-desc');
+  tblFiltered.sort((a, b) => {
+    let av = a[key], bv = b[key];
+    // Numeric sort for known numeric fields
+    if (['dist_km','elevation','hr','calories','suffer'].includes(key)) {
+      av = parseFloat(av) || 0;
+      bv = parseFloat(bv) || 0;
+    }
+    if (av < bv) return -tblSortDir;
+    if (av > bv) return  tblSortDir;
+    return 0;
+  });
+  tblPageCurrent = 0;
+  tblRender();
+}
+
+function tblPage(dir) {
+  const maxPage = Math.ceil(tblFiltered.length / TBL_PER_PAGE) - 1;
+  tblPageCurrent = Math.max(0, Math.min(maxPage, tblPageCurrent + dir));
+  tblRender();
+}
+
+const SPORT_LABELS = {
+  Run:'Running', WeightTraining:'Gym', Squash:'Squash',
+  Ride:'Cycling', Swim:'Swimming', Walk:'Walk',
+};
+
+function tblRender() {
+  const start = tblPageCurrent * TBL_PER_PAGE;
+  const rows  = tblFiltered.slice(start, start + TBL_PER_PAGE);
+  const total = tblFiltered.length;
+  const maxPage = Math.max(0, Math.ceil(total / TBL_PER_PAGE) - 1);
+
+  document.getElementById('tblCount').textContent =
+    `${total} activit${total !== 1 ? 'ies' : 'y'}`;
+  document.getElementById('tblPageInfo').textContent =
+    total === 0 ? '' : `${start + 1}–${Math.min(start + TBL_PER_PAGE, total)} of ${total}`;
+  document.getElementById('tblPrev').disabled = tblPageCurrent === 0;
+  document.getElementById('tblNext').disabled = tblPageCurrent >= maxPage;
+
+  if (rows.length === 0) {
+    document.getElementById('tblBody').innerHTML =
+      '<tr><td colspan="10" class="tbl-empty">No activities match your filters.</td></tr>';
+    return;
+  }
+
+  const sportClass = s => `sport-badge sport-${['Run','WeightTraining','Squash','Ride'].includes(s) ? s : 'Other'}`;
+  const fmt = v => (v === null || v === undefined || v === '—') ? '<span style="color:#ddd">—</span>' : v;
+
+  document.getElementById('tblBody').innerHTML = rows.map(r => `
+    <tr>
+      <td style="color:#aaa;font-size:12px">${r.date}</td>
+      <td><a class="tbl-link tbl-name" href="https://www.strava.com/activities/${r.id}" target="_blank" title="${r.name}">${r.name}</a></td>
+      <td><span class="${sportClass(r.sport)}">${SPORT_LABELS[r.sport] || r.sport}</span></td>
+      <td>${r.dist_km > 0 ? r.dist_km + ' km' : fmt('—')}</td>
+      <td>${fmt(r.time)}</td>
+      <td>${fmt(r.pace)}</td>
+      <td>${r.elevation > 0 ? r.elevation + ' m' : fmt('—')}</td>
+      <td>${fmt(r.hr)}</td>
+      <td>${fmt(r.calories)}</td>
+      <td>${fmt(r.suffer)}</td>
+    </tr>`).join('');
+}
 
 function render(d) {
 
