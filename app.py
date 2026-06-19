@@ -1,5 +1,7 @@
 import os
 import io
+import json
+import time
 import requests
 from dotenv import load_dotenv
 load_dotenv()
@@ -7,6 +9,37 @@ from flask import Flask, redirect, request, session, render_template, jsonify, s
 from datetime import datetime, timedelta
 from collections import defaultdict
 from PIL import Image, ImageDraw, ImageFont
+
+# ─── ACTIVITY CACHE ───────────────────────────────────────────────
+# Stores fetched activities on disk per athlete, avoids re-fetching
+# every page load. Cache expires after CACHE_TTL seconds.
+CACHE_DIR = os.path.join(os.path.dirname(__file__), ".cache")
+CACHE_TTL = 3600  # 1 hour — change to 300 for 5 min during dev
+
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+def _cache_path(athlete_id):
+    return os.path.join(CACHE_DIR, f"activities_{athlete_id}.json")
+
+def _load_cache(athlete_id):
+    path = _cache_path(athlete_id)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        if time.time() - data["ts"] < CACHE_TTL:
+            return data["activities"]
+    except Exception:
+        pass
+    return None
+
+def _save_cache(athlete_id, activities):
+    try:
+        with open(_cache_path(athlete_id), "w") as f:
+            json.dump({"ts": time.time(), "activities": activities}, f)
+    except Exception:
+        pass
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "change-this-to-random-string")
@@ -127,7 +160,16 @@ def get_headers():
     return {"Authorization": f"Bearer {session['access_token']}"}
 
 
-def fetch_activities(months=24):
+def fetch_activities(months=24, force_refresh=False):
+    athlete_id = session.get("athlete", {}).get("id")
+
+    # Try cache first (unless force_refresh requested)
+    if athlete_id and not force_refresh:
+        cached = _load_cache(athlete_id)
+        if cached is not None:
+            return cached
+
+    # Fetch fresh from Strava
     after = int((datetime.utcnow() - timedelta(days=months * 30)).timestamp())
     activities, page = [], 1
     while True:
@@ -141,6 +183,10 @@ def fetch_activities(months=24):
         if len(batch) < 100:
             break
         page += 1
+
+    if athlete_id:
+        _save_cache(athlete_id, activities)
+
     return activities
 
 
@@ -440,71 +486,71 @@ def generate_card(card_data):
     draw.ellipse([W - 280, -120, W + 80, 260], outline="#fc4c02", width=3)
     draw.ellipse([W - 240, -80, W + 40, 220], outline=(252, 76, 2, 60), width=1)
 
-    # Fonts
-    f_huge   = _font(FONT_BLACK,   120)
-    f_big    = _font(FONT_BLACK,    72)
-    f_med    = _font(FONT_BOLD,     36)
-    f_small  = _font(FONT_REGULAR,  28)
-    f_tiny   = _font(FONT_REGULAR,  22)
+    # Fonts — all sizes boosted for readability
+    f_huge   = _font(FONT_BLACK,   160)
+    f_big    = _font(FONT_BLACK,    96)
+    f_med    = _font(FONT_BOLD,     52)
+    f_small  = _font(FONT_BOLD,     40)
+    f_tiny   = _font(FONT_BOLD,     32)
+    f_label  = _font(FONT_REGULAR,  28)
 
     # ── HEADER ──
-    draw.text((60, 40),  "⚡ STRAVA STATS", font=f_tiny, fill="#fc4c02")
+    draw.text((60, 36),  "STRAVA STATS", font=f_label, fill="#fc4c02")
     name = card_data.get("name", "Athlete")
-    draw.text((60, 80),  name, font=f_big, fill="#ffffff")
-    draw.text((60, 170), f"Running Report · {datetime.utcnow().strftime('%B %Y')}", font=f_small, fill="#888888")
+    draw.text((60, 76),  name, font=f_big, fill="#ffffff")
+    draw.text((60, 190), f"Running Report  ·  {datetime.utcnow().strftime('%B %Y')}", font=f_tiny, fill="#666688")
 
     # Divider
-    draw.rectangle([60, 220, W - 60, 223], fill="#333355")
+    draw.rectangle([60, 248, W - 60, 252], fill="#333355")
 
     # ── STAT BLOCKS ──
     stats = [
-        ("TOTAL RUNS",     str(card_data.get("total_runs", "—")),     "runs"),
-        ("TOTAL DISTANCE", f"{card_data.get('total_km', '—')} km",    ""),
-        ("LONGEST RUN",    f"{card_data.get('longest_run', '—')} km", ""),
+        ("TOTAL RUNS",     str(card_data.get("total_runs", "—"))),
+        ("TOTAL DISTANCE", f"{card_data.get('total_km', '—')} km"),
+        ("LONGEST RUN",    f"{card_data.get('longest_run', '—')} km"),
     ]
-
-    x_start, y_start = 60, 260
     block_w = (W - 120) // 3
-    for i, (label, value, unit) in enumerate(stats):
-        x = x_start + i * block_w
-        draw.text((x, y_start),      label, font=f_tiny,  fill="#888888")
-        draw.text((x, y_start + 36), value, font=f_big,   fill="#ffffff")
+    for i, (label, value) in enumerate(stats):
+        x = 60 + i * block_w
+        draw.text((x, 268), label, font=f_label, fill="#666688")
+        draw.text((x, 306), value, font=f_med,   fill="#ffffff")
 
     # ── PR SECTION ──
-    draw.text((60, 490), "PERSONAL BESTS", font=_font(FONT_BOLD, 24), fill="#fc4c02")
-    draw.rectangle([60, 522, W - 60, 525], fill="#fc4c02")
+    draw.text((60, 430), "PERSONAL BESTS", font=f_tiny, fill="#fc4c02")
+    draw.rectangle([60, 474, W - 60, 478], fill="#fc4c02")
 
     pr_items = [
-        ("5K",   card_data.get("best_5k",  "—")),
-        ("HALF", card_data.get("best_hm",  "—")),
+        ("5K",           card_data.get("best_5k", "—")),
+        ("HALF MARATHON", card_data.get("best_hm", "—")),
     ]
     for i, (dist, time) in enumerate(pr_items):
-        x = 60 + i * 480
-        draw.text((x,      545), dist, font=f_small, fill="#888888")
-        draw.text((x,      585), time, font=f_huge,  fill="#ffffff")
+        x = 60 + i * 500
+        draw.text((x, 492), dist, font=f_label, fill="#666688")
+        draw.text((x, 530), time, font=f_huge,  fill="#ffffff")
 
     # ── FITNESS AGE ──
     y_fit = 730
     fit_age = card_data.get("fitness_age")
     if fit_age:
-        draw.text((60, y_fit), "FITNESS AGE", font=_font(FONT_BOLD, 24), fill="#fc4c02")
-        draw.text((60, y_fit + 36), str(fit_age), font=f_big, fill="#ffffff")
-        draw.text((60, y_fit + 110), "years young", font=f_small, fill="#888888")
+        draw.text((60, y_fit),       "FITNESS AGE",  font=f_tiny,  fill="#fc4c02")
+        draw.text((60, y_fit + 48),  str(fit_age),   font=f_big,   fill="#ffffff")
+        draw.text((60, y_fit + 152), "years young",  font=f_small, fill="#666688")
     else:
-        draw.text((60, y_fit), "FITNESS AGE", font=_font(FONT_BOLD, 24), fill="#fc4c02")
-        draw.text((60, y_fit + 36), "Add birth year\nto unlock", font=f_small, fill="#555577")
+        draw.text((60, y_fit),       "FITNESS AGE",       font=f_tiny,  fill="#fc4c02")
+        draw.text((60, y_fit + 48),  "Add birth year",    font=f_small, fill="#555577")
+        draw.text((60, y_fit + 100), "to unlock",         font=f_small, fill="#555577")
 
     # ── PACE IMPROVEMENT ──
     pace_imp = card_data.get("pace_improve")
     if pace_imp and pace_imp > 0:
-        draw.text((520, y_fit), "PACE GAINED", font=_font(FONT_BOLD, 24), fill="#fc4c02")
-        draw.text((520, y_fit + 36), f"+{pace_imp}", font=f_big, fill="#06d6a0")
-        draw.text((520, y_fit + 110), "min/km improvement", font=f_small, fill="#888888")
+        draw.text((530, y_fit),       "PACE GAINED",          font=f_tiny,  fill="#fc4c02")
+        draw.text((530, y_fit + 48),  f"+{pace_imp}",         font=f_big,   fill="#06d6a0")
+        draw.text((530, y_fit + 152), "min/km improvement",   font=f_small, fill="#666688")
 
     # ── FOOTER ──
-    draw.rectangle([0, H - 80, W, H], fill="#fc4c02")
-    draw.text((60, H - 56), "stravastats.app", font=f_small, fill="#ffffff")
-    draw.text((W - 300, H - 56), "Share your stats 🏃", font=f_small, fill="#ffffff")
+    draw.rectangle([0, H - 90, W, H], fill="#fc4c02")
+    draw.text((60,      H - 62), "stravastats.app",   font=f_small, fill="#ffffff")
+    draw.text((W - 380, H - 62), "Share your stats!", font=f_small, fill="#ffffff")
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", quality=95)
@@ -526,11 +572,11 @@ def dashboard():
 def api_stats():
     if "access_token" not in session:
         return jsonify({"error": "not authenticated"}), 401
-    # Accept birth_year from query param and store in session
     birth_year = request.args.get("birth_year")
     if birth_year:
         session["birth_year"] = birth_year
-    activities = fetch_activities(months=24)
+    force_refresh = request.args.get("refresh") == "1"
+    activities = fetch_activities(months=24, force_refresh=force_refresh)
     stats = compute_stats(activities)
     return jsonify(stats)
 
