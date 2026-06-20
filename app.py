@@ -18,8 +18,6 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), ".cache")
 # Cache is permanent — only cleared by explicit ?refresh=1 from the user.
 # This keeps Strava API requests minimal.
 
-os.makedirs(CACHE_DIR, exist_ok=True)
-
 def _cache_path(athlete_id):
     return os.path.join(CACHE_DIR, f"activities_{athlete_id}.json")
 
@@ -36,10 +34,11 @@ def _load_cache(athlete_id):
 
 def _save_cache(athlete_id, activities):
     try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
         with open(_cache_path(athlete_id), "w") as f:
             json.dump({"ts": time.time(), "activities": activities}, f)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[cache] save failed: {e}")
 
 
 # ─── ENRICHMENT CACHE ─────────────────────────────────────────────
@@ -58,10 +57,11 @@ def _load_enrichment(athlete_id):
 
 def _save_enrichment(athlete_id, data):
     try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
         with open(_enrich_path(athlete_id), "w") as f:
             json.dump(data, f)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[cache] enrichment save failed: {e}")
 
 
 def fetch_weather(lat, lon, date_str):
@@ -173,6 +173,8 @@ def enrich_activities_background(athlete_id, activities):
             # Save incrementally so progress isn't lost if interrupted
             _save_enrichment(athlete_id, enrichment)
 
+from demo_data import DEMO_ACTIVITIES, DEMO_ENRICHMENT, ATHLETE as DEMO_ATHLETE
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "change-this-to-random-string")
 
@@ -238,11 +240,86 @@ def fitness_age(vo2max, actual_age, gender="M"):
     return min(actual_age + 10, 70)
 
 
+# ─── DEMO HELPERS ─────────────────────────────────────────────────
+
+def is_demo():
+    return session.get("demo_mode") is True
+
+def demo_safe_fetch():
+    return DEMO_ACTIVITIES, None
+
+def get_activities_and_enrichment(force_refresh=False):
+    """Single entry point — returns (activities, enrichment, error_tuple_or_None)."""
+    if is_demo():
+        return DEMO_ACTIVITIES, DEMO_ENRICHMENT, None
+    result = _safe_fetch(force_refresh)
+    activities = result[0]
+    if activities is None:
+        return None, {}, result[1:]
+    athlete_id = session.get("athlete", {}).get("id")
+    enrichment = _load_enrichment(athlete_id) if athlete_id else {}
+    return activities, enrichment, None
+
+
 # ─── AUTH ─────────────────────────────────────────────────────────
+
+@app.route("/api/debug")
+def api_debug():
+    """Quick Strava connection check — open this in browser to diagnose fetch issues."""
+    if "access_token" not in session:
+        return jsonify({"error": "not logged in"}), 401
+    import time as _time, glob as _glob
+    token = session["access_token"]
+    after = int((datetime.utcnow() - timedelta(days=730)).timestamp())
+    t0 = _time.time()
+    try:
+        r = requests.get(
+            f"{STRAVA_API_BASE}/athlete/activities",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"per_page": 1, "page": 1, "after": after},
+            timeout=12,
+        )
+        elapsed = round(_time.time() - t0, 2)
+        # Rate limit headers
+        limit_15  = r.headers.get("X-RateLimit-Limit", "?").split(",")
+        usage_15  = r.headers.get("X-RateLimit-Usage", "?").split(",")
+        athlete_id = session.get("athlete", {}).get("id")
+        cache_file = _cache_path(athlete_id) if athlete_id else "n/a"
+        cache_exists = os.path.exists(cache_file)
+        cache_size = os.path.getsize(cache_file) if cache_exists else 0
+        return jsonify({
+            "status_code":        r.status_code,
+            "elapsed_sec":        elapsed,
+            "rate_limit_15min":   limit_15[0] if limit_15 else "?",
+            "rate_used_15min":    usage_15[0] if usage_15 else "?",
+            "rate_limit_daily":   limit_15[1] if len(limit_15) > 1 else "?",
+            "rate_used_daily":    usage_15[1] if len(usage_15) > 1 else "?",
+            "cache_dir":          CACHE_DIR,
+            "cache_file":         cache_file,
+            "cache_exists":       cache_exists,
+            "cache_size_kb":      round(cache_size / 1024, 1),
+            "cache_dir_files":    _glob.glob(os.path.join(CACHE_DIR, "*")),
+            "response_preview":   r.json() if r.status_code == 200 else r.text[:300],
+        })
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "timeout", "elapsed_sec": round(_time.time() - t0, 2)}), 504
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/demo")
+def demo():
+    """One-click demo mode — no Strava auth needed."""
+    session.clear()
+    session["demo_mode"]  = True
+    session["athlete"]    = DEMO_ATHLETE
+    session["birth_year"] = "1997"   # pre-set so fitness age renders immediately
+    return redirect("/dashboard")
+
 
 @app.route("/")
 def index():
-    if "access_token" in session:
+    if "access_token" in session or is_demo():
         return redirect("/dashboard")
     return render_template("login.html")
 
@@ -279,6 +356,8 @@ def callback():
         return f"Login error: {e}", 500
     if "access_token" not in data:
         return f"Token error: {data}", 400
+    # Explicitly clear any leftover demo state
+    session.clear()
     session["access_token"]  = data["access_token"]
     session["refresh_token"] = data["refresh_token"]
     session["athlete"]       = data.get("athlete", {})
@@ -297,32 +376,74 @@ def get_headers():
     return {"Authorization": f"Bearer {session['access_token']}"}
 
 
-def fetch_activities(months=24, force_refresh=False):
+FETCH_MONTHS = 2   # change to 24 later once caching is confirmed working
+
+def fetch_activities(months=None, force_refresh=False):
+    # Demo mode — never hit the network
+    if is_demo():
+        return DEMO_ACTIVITIES
+
+    if months is None:
+        months = FETCH_MONTHS
+
     athlete_id = session.get("athlete", {}).get("id")
+    t0 = time.time()
 
     # Try cache first (unless force_refresh requested)
     if athlete_id and not force_refresh:
         cached = _load_cache(athlete_id)
         if cached is not None:
+            print(f"[fetch] cache hit — {len(cached)} activities in {round(time.time()-t0,2)}s")
             return cached
 
-    # Fetch fresh from Strava
+    print(f"[fetch] no cache — fetching last {months} months from Strava…")
     after = int((datetime.utcnow() - timedelta(days=months * 30)).timestamp())
     activities, page = [], 1
     while True:
-        r = requests.get(f"{STRAVA_API_BASE}/athlete/activities",
-                         headers=get_headers(),
-                         params={"per_page": 100, "page": page, "after": after})
+        try:
+            r = requests.get(
+                f"{STRAVA_API_BASE}/athlete/activities",
+                headers=get_headers(),
+                params={"per_page": 100, "page": page, "after": after},
+                timeout=12,
+            )
+        except requests.exceptions.Timeout:
+            print(f"[fetch] timeout on page {page} after {round(time.time()-t0,1)}s")
+            break
+        except requests.exceptions.RequestException as e:
+            print(f"[fetch] request error: {e}")
+            break
+
+        print(f"[fetch] page {page} → HTTP {r.status_code} ({round(time.time()-t0,2)}s)")
+
+        # Handle rate limiting (429) — return cached data if available
+        if r.status_code == 429:
+            print("[fetch] rate limited!")
+            if athlete_id:
+                cached = _load_cache(athlete_id)
+                if cached is not None:
+                    return cached
+            raise RuntimeError("rate_limited")
+
+        if r.status_code != 200:
+            print(f"[fetch] unexpected status {r.status_code}: {r.text[:200]}")
+            break
+
         batch = r.json()
         if not batch or not isinstance(batch, list):
+            print(f"[fetch] empty batch on page {page}, done")
             break
         activities.extend(batch)
+        print(f"[fetch] got {len(batch)} activities (total {len(activities)})")
         if len(batch) < 100:
             break
         page += 1
 
+    print(f"[fetch] done — {len(activities)} activities in {round(time.time()-t0,2)}s total")
+
     if athlete_id:
         _save_cache(athlete_id, activities)
+        print(f"[fetch] cache saved to {_cache_path(athlete_id)}")
         # Kick off enrichment in background — doesn't block the response
         t = threading.Thread(
             target=enrich_activities_background,
@@ -706,37 +827,52 @@ def generate_card(card_data):
 
 @app.route("/dashboard")
 def dashboard():
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return redirect("/")
     athlete = session.get("athlete", {})
-    return render_template("dashboard.html", athlete=athlete)
+    return render_template("dashboard.html", athlete=athlete, demo=is_demo())
 
 
 @app.route("/api/stats")
 def api_stats():
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return jsonify({"error": "not authenticated"}), 401
     birth_year = request.args.get("birth_year")
     if birth_year:
         session["birth_year"] = birth_year
     force_refresh = request.args.get("refresh") == "1"
-    activities = fetch_activities(months=24, force_refresh=force_refresh)
+    activities, enrichment, err = get_activities_and_enrichment(force_refresh)
+    if activities is None:
+        return err[0] if len(err) == 2 else (err[0], err[1])
     stats = compute_stats(activities)
     return jsonify(stats)
+
+
+def _safe_fetch(force_refresh=False):
+    """Wraps fetch_activities and returns (activities, error_response_or_None)."""
+    try:
+        return fetch_activities(force_refresh=force_refresh), None
+    except RuntimeError as e:
+        if "rate_limited" in str(e):
+            return None, jsonify({
+                "error": "rate_limited",
+                "message": "Strava rate limit reached. Your cached data is shown. Try again in 15 minutes.",
+            }), 429
+        return None, jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/enrichment")
 def api_enrichment():
     """Returns enrichment progress + data. Polled by frontend."""
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return jsonify({"error": "not authenticated"}), 401
-    athlete_id = session.get("athlete", {}).get("id")
-    activities = fetch_activities(months=24)
-    enrichment = _load_enrichment(athlete_id) if athlete_id else {}
+    activities, enrichment, err = get_activities_and_enrichment()
+    if activities is None:
+        return jsonify({"total": 0, "done": 0, "complete": True, "enrichment": {}})
     runs_with_gps = [a for a in activities
                      if a.get("sport_type") == "Run" and a.get("start_latlng")]
-    total   = len(runs_with_gps)
-    done    = sum(1 for a in runs_with_gps if str(a["id"]) in enrichment)
+    total = len(runs_with_gps)
+    done  = sum(1 for a in runs_with_gps if str(a["id"]) in enrichment)
     return jsonify({
         "total":      total,
         "done":       done,
@@ -748,11 +884,11 @@ def api_enrichment():
 @app.route("/api/weather-insights")
 def api_weather_insights():
     """Compute pace-vs-temperature and pace-vs-condition buckets."""
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return jsonify({"error": "not authenticated"}), 401
-    athlete_id = session.get("athlete", {}).get("id")
-    activities = fetch_activities(months=24)
-    enrichment = _load_enrichment(athlete_id) if athlete_id else {}
+    activities, enrichment, err = get_activities_and_enrichment()
+    if activities is None:
+        return jsonify({"temp_labels": [], "temp_values": [], "cond_labels": [], "cond_values": [], "runs_with_weather": 0})
     runs = [a for a in activities if a.get("sport_type") == "Run"]
 
     # Pace vs temperature buckets (<5, 5-10, 10-15, 15-20, 20-25, 25+°C)
@@ -806,12 +942,12 @@ def api_weather_insights():
 
 @app.route("/api/activities")
 def api_activities():
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return jsonify({"error": "not authenticated"}), 401
     force_refresh = request.args.get("refresh") == "1"
-    activities  = fetch_activities(months=24, force_refresh=force_refresh)
-    athlete_id  = session.get("athlete", {}).get("id")
-    enrichment  = _load_enrichment(athlete_id) if athlete_id else {}
+    activities, enrichment, err = get_activities_and_enrichment(force_refresh)
+    if activities is None:
+        return err[0] if len(err) == 2 else (err[0], err[1])
     rows = []
     for a in activities:
         spd     = a.get("average_speed", 0)
@@ -842,9 +978,11 @@ def api_activities():
 
 @app.route("/api/card")
 def api_card():
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return jsonify({"error": "not authenticated"}), 401
-    activities = fetch_activities(months=24)
+    activities, enrichment, err = get_activities_and_enrichment()
+    if activities is None:
+        return "Rate limited — try again in 15 minutes.", 429
     stats = compute_stats(activities)
     buf = generate_card(stats["card_data"])
     athlete = session.get("athlete", {})

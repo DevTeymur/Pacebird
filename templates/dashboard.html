@@ -305,6 +305,17 @@ tbody td { padding:11px 14px; vertical-align:middle; }
   <button class="tab-btn" onclick="switchTab('share')">📲 Share Card</button>
 </div>
 
+{% if demo %}
+<div style="background:#1a1a2e;color:#fc4c02;text-align:center;padding:8px;font-size:12px;font-weight:700;letter-spacing:0.5px;">
+  👀 DEMO MODE — Synthetic data based on a real athlete profile · <a href="/" style="color:#ff8c42;text-decoration:none;">Connect your Strava →</a>
+</div>
+{% endif %}
+
+<!-- RATE LIMIT BANNER -->
+<div id="rateLimitBanner" style="display:none;background:#fff7ed;border-bottom:1px solid #ffd0a8;padding:10px 40px;font-size:13px;color:#b45309;">
+  ⚠️ <strong>Strava rate limit reached.</strong> Showing your cached data. Resets every 15 minutes.
+</div>
+
 <!-- LOADING -->
 <div class="loading" id="loading">
   <div class="spinner"></div>
@@ -548,8 +559,8 @@ tbody td { padding:11px 14px; vertical-align:middle; }
         <div class="tbl-pagination">
           <span class="tbl-page-info" id="tblPageInfo"></span>
           <div class="tbl-page-btns">
-            <button class="tbl-page-btn" id="tblPrev" onclick="tblPage(-1)">← Prev</button>
-            <button class="tbl-page-btn" id="tblNext" onclick="tblPage(+1)">Next →</button>
+            <button class="tbl-page-btn" id="tblPrev" onclick="tblPageNav(-1)">← Prev</button>
+            <button class="tbl-page-btn" id="tblNext" onclick="tblPageNav(+1)">Next →</button>
           </div>
         </div>
       </div>
@@ -659,18 +670,44 @@ function loadStats(forceRefresh = false) {
   document.getElementById('loading').style.display  = 'flex';
   document.getElementById('content').style.display  = 'none';
   const url = forceRefresh ? '/api/stats?refresh=1' : '/api/stats';
+
+  // Show a helpful message if it takes too long
+  const slowTimer = setTimeout(() => {
+    document.getElementById('loading').innerHTML = `
+      <div style="text-align:center;max-width:420px;padding:20px">
+        <div style="font-size:32px;margin-bottom:16px">⏳</div>
+        <p style="font-size:15px;font-weight:700;margin-bottom:8px">Still loading…</p>
+        <p style="font-size:13px;color:#aaa;margin-bottom:20px">
+          Strava is taking a while. You may be rate-limited (100 requests per 15 min).
+          If you logged in recently, your data is being fetched for the first time.
+        </p>
+        <a href="/demo" style="display:inline-block;background:#fc4c02;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;margin-right:8px">👀 Try demo instead</a>
+        <a href="/api/debug" target="_blank" style="display:inline-block;border:1px solid #eee;color:#aaa;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:13px;">🔍 Debug</a>
+      </div>`;
+  }, 8000);
+
   fetch(url)
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) return r.json().then(d => Promise.reject(d));
+      return r.json();
+    })
     .then(d => {
+      clearTimeout(slowTimer);
       document.getElementById('loading').style.display  = 'none';
       document.getElementById('content').style.display  = 'block';
       render(d);
-      // Start polling for enrichment progress (weather + location)
       startEnrichmentPolling();
     })
-    .catch(() => {
+    .catch((err) => {
+      clearTimeout(slowTimer);
+      console.error('loadStats error:', err);
       document.getElementById('loading').innerHTML =
-        '<p style="color:#fc4c02">Failed to load. <a href="/">Try again</a></p>';
+        `<div style="text-align:center;padding:20px">
+          <p style="color:#fc4c02;font-weight:700;margin-bottom:8px">Failed to load stats.</p>
+          <p style="font-size:12px;color:#aaa;margin-bottom:16px">${err}</p>
+          <a href="/" style="color:#fc4c02">Try again</a> &nbsp;·&nbsp;
+          <a href="/demo" style="color:#aaa">Use demo instead</a>
+        </div>`;
     });
 }
 
@@ -818,7 +855,6 @@ let tblAllRows   = [];   // full dataset from /api/activities
 let tblFiltered  = [];   // after search/filter
 let tblSortKey   = 'date';
 let tblSortDir   = -1;   // -1 = desc, 1 = asc
-let tblPage      = 0;
 const TBL_PER_PAGE = 25;
 
 // Lazy-load — only fetch when user opens the tab
@@ -889,7 +925,7 @@ function tblSort(key) {
   tblRender();
 }
 
-function tblPage(dir) {
+function tblPageNav(dir) {
   const maxPage = Math.ceil(tblFiltered.length / TBL_PER_PAGE) - 1;
   tblPageCurrent = Math.max(0, Math.min(maxPage, tblPageCurrent + dir));
   tblRender();
