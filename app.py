@@ -2,6 +2,7 @@ import os
 import io
 import json
 import time
+import threading
 import requests
 from dotenv import load_dotenv
 load_dotenv()
@@ -16,8 +17,6 @@ from PIL import Image, ImageDraw, ImageFont
 CACHE_DIR = os.path.join(os.path.dirname(__file__), ".cache")
 # Cache is permanent — only cleared by explicit ?refresh=1 from the user.
 # This keeps Strava API requests minimal.
-
-os.makedirs(CACHE_DIR, exist_ok=True)
 
 def _cache_path(athlete_id):
     return os.path.join(CACHE_DIR, f"activities_{athlete_id}.json")
@@ -35,10 +34,146 @@ def _load_cache(athlete_id):
 
 def _save_cache(athlete_id, activities):
     try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
         with open(_cache_path(athlete_id), "w") as f:
             json.dump({"ts": time.time(), "activities": activities}, f)
+    except Exception as e:
+        print(f"[cache] save failed: {e}")
+
+
+# ─── ENRICHMENT CACHE ─────────────────────────────────────────────
+# Stores weather + location per activity ID, permanently.
+# Separate from Strava cache so a Strava refresh doesn't wipe enrichment.
+
+def _enrich_path(athlete_id):
+    return os.path.join(CACHE_DIR, f"enrichment_{athlete_id}.json")
+
+def _load_enrichment(athlete_id):
+    try:
+        with open(_enrich_path(athlete_id)) as f:
+            return json.load(f)
     except Exception:
-        pass
+        return {}
+
+def _save_enrichment(athlete_id, data):
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(_enrich_path(athlete_id), "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"[cache] enrichment save failed: {e}")
+
+
+def fetch_weather(lat, lon, date_str):
+    """Fetch historical hourly weather from Open-Meteo for a given date/location."""
+    try:
+        r = requests.get(
+            "https://archive-api.open-meteo.com/v1/archive",
+            params={
+                "latitude":        lat,
+                "longitude":       lon,
+                "start_date":      date_str,
+                "end_date":        date_str,
+                "hourly":          "temperature_2m,precipitation,windspeed_10m,weathercode",
+                "timezone":        "auto",
+            },
+            timeout=8,
+        )
+        d = r.json()
+        hourly = d.get("hourly", {})
+        # Take midday (noon) values as representative
+        idx = 12
+        return {
+            "temp_c":    round(hourly.get("temperature_2m", [None] * 13)[idx] or 0, 1),
+            "precip_mm": round(hourly.get("precipitation",  [None] * 13)[idx] or 0, 1),
+            "wind_kph":  round(hourly.get("windspeed_10m",  [None] * 13)[idx] or 0, 1),
+            "wcode":     hourly.get("weathercode", [None] * 13)[idx],
+        }
+    except Exception:
+        return None
+
+
+def fetch_location(lat, lon):
+    """Reverse geocode via Nominatim (OpenStreetMap). Rate limit: 1 req/sec."""
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"lat": lat, "lon": lon, "format": "json"},
+            headers={"User-Agent": "StravaStatsDashboard/1.0"},
+            timeout=6,
+        )
+        d = r.json()
+        addr = d.get("address", {})
+        city = (addr.get("city") or addr.get("town") or
+                addr.get("village") or addr.get("municipality") or "")
+        country = addr.get("country_code", "").upper()
+        return f"{city}, {country}" if city else country or None
+    except Exception:
+        return None
+
+
+# WMO weather code → human label + emoji
+WMO_LABELS = {
+    0: ("Clear", "☀️"), 1: ("Mostly clear", "🌤️"), 2: ("Partly cloudy", "⛅"),
+    3: ("Overcast", "☁️"), 45: ("Foggy", "🌫️"), 48: ("Foggy", "🌫️"),
+    51: ("Light drizzle", "🌦️"), 53: ("Drizzle", "🌦️"), 55: ("Heavy drizzle", "🌦️"),
+    61: ("Light rain", "🌧️"), 63: ("Rain", "🌧️"), 65: ("Heavy rain", "🌧️"),
+    71: ("Light snow", "❄️"), 73: ("Snow", "❄️"), 75: ("Heavy snow", "❄️"),
+    80: ("Showers", "🌧️"), 81: ("Showers", "🌧️"), 82: ("Heavy showers", "⛈️"),
+    95: ("Thunderstorm", "⛈️"),
+}
+
+def wmo_label(code):
+    if code is None:
+        return ("Unknown", "")
+    return WMO_LABELS.get(int(code), ("Unknown", ""))
+
+
+def enrich_activities_background(athlete_id, activities):
+    """
+    Run in a background thread. For each run with GPS coords:
+    - Fetch weather from Open-Meteo (no rate limit)
+    - Fetch location from Nominatim (1 req/sec)
+    Only processes activities not already enriched.
+    """
+    enrichment = _load_enrichment(athlete_id)
+    runs_with_gps = [
+        a for a in activities
+        if a.get("sport_type") == "Run"
+        and a.get("start_latlng")
+        and len(a["start_latlng"]) == 2
+        and str(a["id"]) not in enrichment
+    ]
+
+    if not runs_with_gps:
+        return
+
+    for a in runs_with_gps:
+        act_id = str(a["id"])
+        lat, lon = a["start_latlng"]
+        date_str = a.get("start_date_local", "")[:10]
+        if not date_str:
+            continue
+
+        entry = {}
+
+        # Weather — no rate limit, fast
+        w = fetch_weather(lat, lon, date_str)
+        if w:
+            entry["weather"] = w
+
+        # Location — 1 req/sec rate limit
+        loc = fetch_location(lat, lon)
+        if loc:
+            entry["location"] = loc
+        time.sleep(1.1)  # respect Nominatim rate limit
+
+        if entry:
+            enrichment[act_id] = entry
+            # Save incrementally so progress isn't lost if interrupted
+            _save_enrichment(athlete_id, enrichment)
+
+from demo_data import DEMO_ACTIVITIES, DEMO_ENRICHMENT, ATHLETE as DEMO_ATHLETE
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "change-this-to-random-string")
@@ -51,65 +186,189 @@ STRAVA_AUTH_URL  = "https://www.strava.com/oauth/authorize"
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_API_BASE  = "https://www.strava.com/api/v3"
 
-# Font paths (Lato shipped with most Linux/Mac; fallback to default)
-FONT_BOLD   = "/usr/share/fonts/truetype/lato/Lato-Bold.ttf"
-FONT_REGULAR= "/usr/share/fonts/truetype/lato/Lato-Regular.ttf"
-FONT_BLACK  = "/usr/share/fonts/truetype/lato/Lato-Black.ttf"
+# Font search — tries Mac system fonts, then Linux, then Pillow default
+def _find_font(*candidates):
+    """Return the first font path that exists on this system."""
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+# Bold / Black weight candidates (Mac → Linux → None)
+_BOLD_CANDIDATES = [
+    # Mac system fonts
+    "/Library/Fonts/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial.ttf",
+    "/System/Library/Fonts/Arial.ttf",
+    # Linux
+    "/usr/share/fonts/truetype/lato/Lato-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+]
+_REGULAR_CANDIDATES = [
+    "/Library/Fonts/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/lato/Lato-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+]
+
+FONT_BOLD    = _find_font(*_BOLD_CANDIDATES)
+FONT_REGULAR = _find_font(*_REGULAR_CANDIDATES)
+FONT_BLACK   = FONT_BOLD   # use bold as black fallback
 
 def _font(path, size):
+    if path:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    # Last resort: Pillow built-in (tiny but always works)
     try:
-        return ImageFont.truetype(path, size)
+        return ImageFont.load_default(size=size)
     except Exception:
         return ImageFont.load_default()
 
 
-# ─── VO2MAX / FITNESS AGE TABLES ──────────────────────────────────
-# VO2max norms by age (male) — from ACSM guidelines
-# Each entry: (age_min, age_max, poor, fair, good, excellent, superior)
-VO2_NORMS_MALE = [
-    (20, 29, 33, 37, 42, 48, 53),
-    (30, 39, 31, 35, 40, 45, 51),
-    (40, 49, 28, 33, 37, 42, 47),
-    (50, 59, 25, 30, 34, 39, 45),
-    (60, 69, 21, 26, 30, 35, 41),
+# ─── VO2MAX / FITNESS AGE ─────────────────────────────────────────
+# Norms: (age_midpoint, avg_upper_bound) — VO2max at which you are
+# "average" for that age group. Source: ACSM / Cooper Institute.
+# If your VO2max <= avg_upper for an age group, your fitness matches
+# that age group's average → fitness age = that midpoint.
+VO2_AVG_UPPER_MALE = [
+    (24, 41), (34, 39), (44, 36), (54, 33), (64, 29),
 ]
-VO2_NORMS_FEMALE = [
-    (20, 29, 28, 32, 36, 41, 45),
-    (30, 39, 26, 30, 34, 38, 43),
-    (40, 49, 24, 27, 31, 36, 41),
-    (50, 59, 21, 24, 28, 32, 37),
-    (60, 69, 18, 21, 24, 29, 35),
+VO2_AVG_UPPER_FEMALE = [
+    (24, 36), (34, 34), (44, 31), (54, 28), (64, 25),
 ]
 
-def estimate_vo2max(best_speed_ms):
-    """Rough VO2max from best 5K-ish speed using simplified Jack Daniels."""
-    if not best_speed_ms or best_speed_ms <= 0:
+import math as _math
+
+def estimate_vo2max(best_5k_speed_ms, best_5k_dist=5000):
+    """
+    Correct Jack Daniels VDOT formula from race performance.
+    best_5k_speed_ms: average m/s of the fastest run >= 4.5 km.
+    """
+    if not best_5k_speed_ms or best_5k_speed_ms <= 0:
         return None
-    pace_min_km = (1000 / best_speed_ms) / 60
-    # VO2 = -4.6 + 0.182258*velocity + 0.000104*velocity^2  (velocity in m/min)
-    v = best_speed_ms * 60  # m/min
-    vo2 = -4.6 + 0.182258 * v + 0.000104 * v ** 2
-    # % VO2max at easy pace correction (assume running at ~75% VO2max)
-    vo2max = vo2 / 0.75
-    return round(max(20, min(80, vo2max)), 1)
+    # Estimate race time for the target distance at that speed
+    t_min = best_5k_dist / best_5k_speed_ms / 60.0
+    v = best_5k_dist / t_min  # m/min
+    # % VO2max sustained at race duration (Daniels & Gilbert)
+    pct = (0.8 + 0.1894393 * _math.exp(-0.012778 * t_min)
+               + 0.2989558 * _math.exp(-0.1932605 * t_min))
+    vo2_at_v = -4.60 + 0.182258 * v + 0.000104 * v ** 2
+    vo2max = vo2_at_v / pct
+    return round(max(20, min(85, vo2max)), 1)
 
 def fitness_age(vo2max, actual_age, gender="M"):
-    """Returns estimated fitness age given VO2max."""
-    norms = VO2_NORMS_MALE if gender == "M" else VO2_NORMS_FEMALE
-    # Find which age bracket the VO2max fits into as "good" or better
-    for (age_min, age_max, poor, fair, good, excellent, superior) in norms:
-        if vo2max >= good:
-            mid = (age_min + age_max) // 2
-            return mid
-    # If below all "good" levels, fitness age = actual age + penalty
-    return min(actual_age + 10, 70)
+    """
+    Return the youngest age group whose average VO2max the athlete matches.
+    E.g. VO2max=34 matches the average of the 20-29 group → fitness age 24.
+    """
+    norms = VO2_AVG_UPPER_MALE if gender == "M" else VO2_AVG_UPPER_FEMALE
+    for (age_mid, avg_upper) in norms:
+        if vo2max <= avg_upper:
+            return age_mid
+    # Above all averages — fitter than average 64yo → use lowest bracket
+    return norms[0][0]
+
+
+# ─── DEMO HELPERS ─────────────────────────────────────────────────
+
+def is_demo():
+    return session.get("demo_mode") is True
+
+def demo_safe_fetch():
+    return DEMO_ACTIVITIES, None
+
+def get_activities_and_enrichment(force_refresh=False):
+    """Single entry point — returns (activities, enrichment, error_tuple_or_None)."""
+    if is_demo():
+        return DEMO_ACTIVITIES, DEMO_ENRICHMENT, None
+    result = _safe_fetch(force_refresh)
+    activities = result[0]
+    if activities is None:
+        return None, {}, result[1:]
+    athlete_id = session.get("athlete", {}).get("id")
+    enrichment = _load_enrichment(athlete_id) if athlete_id else {}
+    return activities, enrichment, None
 
 
 # ─── AUTH ─────────────────────────────────────────────────────────
 
+@app.route("/favicon.ico")
+def favicon():
+    # Return a minimal orange SVG circle as favicon
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+        '<circle cx="16" cy="16" r="16" fill="#fc4c02"/>'
+        '<text x="16" y="22" text-anchor="middle" font-size="18" fill="white">⚡</text>'
+        '</svg>'
+    ).encode("utf-8")
+    return svg, 200, {"Content-Type": "image/svg+xml", "Cache-Control": "public,max-age=86400"}
+
+
+@app.route("/api/debug")
+def api_debug():
+    """Quick Strava connection check — open this in browser to diagnose fetch issues."""
+    if "access_token" not in session:
+        return jsonify({"error": "not logged in"}), 401
+    import time as _time, glob as _glob
+    token = session["access_token"]
+    after = int((datetime.utcnow() - timedelta(days=730)).timestamp())
+    t0 = _time.time()
+    try:
+        r = requests.get(
+            f"{STRAVA_API_BASE}/athlete/activities",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"per_page": 1, "page": 1, "after": after},
+            timeout=12,
+        )
+        elapsed = round(_time.time() - t0, 2)
+        # Rate limit headers
+        limit_15  = r.headers.get("X-RateLimit-Limit", "?").split(",")
+        usage_15  = r.headers.get("X-RateLimit-Usage", "?").split(",")
+        athlete_id = session.get("athlete", {}).get("id")
+        cache_file = _cache_path(athlete_id) if athlete_id else "n/a"
+        cache_exists = os.path.exists(cache_file)
+        cache_size = os.path.getsize(cache_file) if cache_exists else 0
+        return jsonify({
+            "status_code":        r.status_code,
+            "elapsed_sec":        elapsed,
+            "rate_limit_15min":   limit_15[0] if limit_15 else "?",
+            "rate_used_15min":    usage_15[0] if usage_15 else "?",
+            "rate_limit_daily":   limit_15[1] if len(limit_15) > 1 else "?",
+            "rate_used_daily":    usage_15[1] if len(usage_15) > 1 else "?",
+            "cache_dir":          CACHE_DIR,
+            "cache_file":         cache_file,
+            "cache_exists":       cache_exists,
+            "cache_size_kb":      round(cache_size / 1024, 1),
+            "cache_dir_files":    _glob.glob(os.path.join(CACHE_DIR, "*")),
+            "font_bold":          FONT_BOLD,
+            "font_regular":       FONT_REGULAR,
+            "response_preview":   r.json() if r.status_code == 200 else r.text[:300],
+        })
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "timeout", "elapsed_sec": round(_time.time() - t0, 2)}), 504
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/demo")
+def demo():
+    """One-click demo mode — no Strava auth needed."""
+    session.clear()
+    session["demo_mode"]  = True
+    session["athlete"]    = DEMO_ATHLETE
+    session["birth_year"] = "1997"   # pre-set so fitness age renders immediately
+    return redirect("/dashboard")
+
+
 @app.route("/")
 def index():
-    if "access_token" in session:
+    if "access_token" in session or is_demo():
         return redirect("/dashboard")
     return render_template("login.html")
 
@@ -132,15 +391,22 @@ def callback():
     code = request.args.get("code")
     if not code:
         return "Authorization failed.", 400
-    resp = requests.post(STRAVA_TOKEN_URL, data={
-        "client_id":     CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "code":          code,
-        "grant_type":    "authorization_code",
-    })
-    data = resp.json()
+    try:
+        resp = requests.post(STRAVA_TOKEN_URL, data={
+            "client_id":     CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "code":          code,
+            "grant_type":    "authorization_code",
+        }, timeout=10)
+        data = resp.json()
+    except requests.exceptions.Timeout:
+        return "Strava timed out during login. Try again.", 504
+    except Exception as e:
+        return f"Login error: {e}", 500
     if "access_token" not in data:
         return f"Token error: {data}", 400
+    # Explicitly clear any leftover demo state
+    session.clear()
     session["access_token"]  = data["access_token"]
     session["refresh_token"] = data["refresh_token"]
     session["athlete"]       = data.get("athlete", {})
@@ -159,32 +425,81 @@ def get_headers():
     return {"Authorization": f"Bearer {session['access_token']}"}
 
 
-def fetch_activities(months=24, force_refresh=False):
+FETCH_MONTHS = 24
+
+def fetch_activities(months=None, force_refresh=False):
+    # Demo mode — never hit the network
+    if is_demo():
+        return DEMO_ACTIVITIES
+
+    if months is None:
+        months = FETCH_MONTHS
+
     athlete_id = session.get("athlete", {}).get("id")
+    t0 = time.time()
 
     # Try cache first (unless force_refresh requested)
     if athlete_id and not force_refresh:
         cached = _load_cache(athlete_id)
         if cached is not None:
+            print(f"[fetch] cache hit — {len(cached)} activities in {round(time.time()-t0,2)}s")
             return cached
 
-    # Fetch fresh from Strava
+    print(f"[fetch] no cache — fetching last {months} months from Strava…")
     after = int((datetime.utcnow() - timedelta(days=months * 30)).timestamp())
     activities, page = [], 1
     while True:
-        r = requests.get(f"{STRAVA_API_BASE}/athlete/activities",
-                         headers=get_headers(),
-                         params={"per_page": 100, "page": page, "after": after})
+        try:
+            r = requests.get(
+                f"{STRAVA_API_BASE}/athlete/activities",
+                headers=get_headers(),
+                params={"per_page": 100, "page": page, "after": after},
+                timeout=12,
+            )
+        except requests.exceptions.Timeout:
+            print(f"[fetch] timeout on page {page} after {round(time.time()-t0,1)}s")
+            break
+        except requests.exceptions.RequestException as e:
+            print(f"[fetch] request error: {e}")
+            break
+
+        print(f"[fetch] page {page} → HTTP {r.status_code} ({round(time.time()-t0,2)}s)")
+
+        # Handle rate limiting (429) — return cached data if available
+        if r.status_code == 429:
+            print("[fetch] rate limited!")
+            if athlete_id:
+                cached = _load_cache(athlete_id)
+                if cached is not None:
+                    return cached
+            raise RuntimeError("rate_limited")
+
+        if r.status_code != 200:
+            print(f"[fetch] unexpected status {r.status_code}: {r.text[:200]}")
+            break
+
         batch = r.json()
         if not batch or not isinstance(batch, list):
+            print(f"[fetch] empty batch on page {page}, done")
             break
         activities.extend(batch)
+        print(f"[fetch] got {len(batch)} activities (total {len(activities)})")
         if len(batch) < 100:
             break
         page += 1
 
+    print(f"[fetch] done — {len(activities)} activities in {round(time.time()-t0,2)}s total")
+
     if athlete_id:
         _save_cache(athlete_id, activities)
+        print(f"[fetch] cache saved to {_cache_path(athlete_id)}")
+        # Kick off enrichment in background — doesn't block the response
+        t = threading.Thread(
+            target=enrich_activities_background,
+            args=(athlete_id, activities),
+            daemon=True,
+        )
+        t.start()
 
     return activities
 
@@ -361,13 +676,24 @@ def compute_stats(activities):
     top_sports = sorted(sport_counts.items(), key=lambda x: -x[1])[:6]
 
     # ── CALORIE BY SPORT ─────────────────────────────────────────
+    # MET (metabolic equivalent) estimates per sport for fallback
+    MET = {"Run": 9.8, "WeightTraining": 5.0, "Squash": 10.0,
+           "Ride": 7.5, "Walk": 3.8, "Swim": 8.0, "Hike": 6.0}
+    BODY_WEIGHT_KG = 70  # reasonable default
+
     cal_sport = defaultdict(list)
     for a in activities:
         sport = a.get("sport_type", "Other")
-        cals = a.get("calories", 0)
-        mins = a.get("moving_time", 0) / 60
-        if cals > 0 and mins > 0:
-            cal_sport[sport].append(cals / mins * 60)
+        mins  = a.get("moving_time", 0) / 60
+        if mins <= 0:
+            continue
+        cals = a.get("calories") or 0
+        # Strava list endpoint often omits calories — estimate from MET if missing
+        if cals <= 0:
+            met = MET.get(sport, 5.0)
+            cals = met * BODY_WEIGHT_KG * (mins / 60)
+        cal_sport[sport].append(cals / mins * 60)  # kcal/hr
+
     cal_labels, cal_values = [], []
     for sport, vals in sorted(cal_sport.items(), key=lambda x: -sum(x[1]) / len(x[1]))[:6]:
         cal_labels.append(sport)
@@ -561,36 +887,135 @@ def generate_card(card_data):
 
 @app.route("/dashboard")
 def dashboard():
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return redirect("/")
     athlete = session.get("athlete", {})
-    return render_template("dashboard.html", athlete=athlete)
+    return render_template("dashboard.html", athlete=athlete, demo=is_demo())
 
 
 @app.route("/api/stats")
 def api_stats():
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return jsonify({"error": "not authenticated"}), 401
     birth_year = request.args.get("birth_year")
     if birth_year:
         session["birth_year"] = birth_year
     force_refresh = request.args.get("refresh") == "1"
-    activities = fetch_activities(months=24, force_refresh=force_refresh)
+    activities, enrichment, err = get_activities_and_enrichment(force_refresh)
+    if activities is None:
+        return err[0] if len(err) == 2 else (err[0], err[1])
     stats = compute_stats(activities)
     return jsonify(stats)
 
 
+def _safe_fetch(force_refresh=False):
+    """Wraps fetch_activities and returns (activities, error_response_or_None)."""
+    try:
+        return fetch_activities(force_refresh=force_refresh), None
+    except RuntimeError as e:
+        if "rate_limited" in str(e):
+            return None, jsonify({
+                "error": "rate_limited",
+                "message": "Strava rate limit reached. Your cached data is shown. Try again in 15 minutes.",
+            }), 429
+        return None, jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/enrichment")
+def api_enrichment():
+    """Returns enrichment progress + data. Polled by frontend."""
+    if "access_token" not in session and not is_demo():
+        return jsonify({"error": "not authenticated"}), 401
+    activities, enrichment, err = get_activities_and_enrichment()
+    if activities is None:
+        return jsonify({"total": 0, "done": 0, "complete": True, "enrichment": {}})
+    runs_with_gps = [a for a in activities
+                     if a.get("sport_type") == "Run" and a.get("start_latlng")]
+    total = len(runs_with_gps)
+    done  = sum(1 for a in runs_with_gps if str(a["id"]) in enrichment)
+    return jsonify({
+        "total":      total,
+        "done":       done,
+        "complete":   done >= total,
+        "enrichment": enrichment,
+    })
+
+
+@app.route("/api/weather-insights")
+def api_weather_insights():
+    """Compute pace-vs-temperature and pace-vs-condition buckets."""
+    if "access_token" not in session and not is_demo():
+        return jsonify({"error": "not authenticated"}), 401
+    activities, enrichment, err = get_activities_and_enrichment()
+    if activities is None:
+        return jsonify({"temp_labels": [], "temp_values": [], "cond_labels": [], "cond_values": [], "runs_with_weather": 0})
+    runs = [a for a in activities if a.get("sport_type") == "Run"]
+
+    # Pace vs temperature buckets (<5, 5-10, 10-15, 15-20, 20-25, 25+°C)
+    temp_buckets = {
+        "<5°C":    [], "5–10°C":  [], "10–15°C": [],
+        "15–20°C": [], "20–25°C": [], "25°C+":   [],
+    }
+    # Pace vs condition
+    cond_buckets = defaultdict(list)
+
+    for a in runs:
+        spd = a.get("average_speed", 0)
+        if spd <= 0:
+            continue
+        pace = round(1000 / 60 / spd, 2)
+        e = enrichment.get(str(a["id"]), {})
+        w = e.get("weather")
+        if not w:
+            continue
+        t = w["temp_c"]
+        if   t <  5: temp_buckets["<5°C"].append(pace)
+        elif t < 10: temp_buckets["5–10°C"].append(pace)
+        elif t < 15: temp_buckets["10–15°C"].append(pace)
+        elif t < 20: temp_buckets["15–20°C"].append(pace)
+        elif t < 25: temp_buckets["20–25°C"].append(pace)
+        else:        temp_buckets["25°C+"].append(pace)
+
+        label, _ = wmo_label(w.get("wcode"))
+        cond_buckets[label].append(pace)
+
+    def avg_bucket(b):
+        return {k: round(sum(v)/len(v), 2) for k, v in b.items() if v}
+
+    temp_avgs = avg_bucket(temp_buckets)
+    cond_avgs = avg_bucket(cond_buckets)
+
+    # Best temperature range (lowest = fastest pace)
+    best_temp = min(temp_avgs, key=temp_avgs.get) if temp_avgs else None
+    best_cond = min(cond_avgs, key=cond_avgs.get) if cond_avgs else None
+
+    return jsonify({
+        "temp_labels":  list(temp_avgs.keys()),
+        "temp_values":  list(temp_avgs.values()),
+        "cond_labels":  list(cond_avgs.keys()),
+        "cond_values":  list(cond_avgs.values()),
+        "best_temp":    best_temp,
+        "best_cond":    best_cond,
+        "runs_with_weather": len([a for a in runs if str(a["id"]) in enrichment]),
+    })
+
+
 @app.route("/api/activities")
 def api_activities():
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return jsonify({"error": "not authenticated"}), 401
     force_refresh = request.args.get("refresh") == "1"
-    activities = fetch_activities(months=24, force_refresh=force_refresh)
+    activities, enrichment, err = get_activities_and_enrichment(force_refresh)
+    if activities is None:
+        return err[0] if len(err) == 2 else (err[0], err[1])
     rows = []
     for a in activities:
-        spd = a.get("average_speed", 0)
+        spd     = a.get("average_speed", 0)
         dist_km = round(a.get("distance", 0) / 1000, 2)
         moving  = a.get("moving_time", 0)
+        e       = enrichment.get(str(a.get("id")), {})
+        w       = e.get("weather", {})
+        wlabel, wemoji = wmo_label(w.get("wcode")) if w else ("", "")
         rows.append({
             "id":        a.get("id"),
             "name":      a.get("name", ""),
@@ -603,17 +1028,21 @@ def api_activities():
             "hr":        a.get("average_heartrate") or "—",
             "calories":  a.get("calories") or "—",
             "suffer":    a.get("suffer_score") or "—",
+            "location":  e.get("location", ""),
+            "temp_c":    w.get("temp_c", ""),
+            "weather":   f"{wemoji} {wlabel}".strip() if wlabel else "",
         })
-    # Sort newest first by default
     rows.sort(key=lambda r: r["date"], reverse=True)
     return jsonify(rows)
 
 
 @app.route("/api/card")
 def api_card():
-    if "access_token" not in session:
+    if "access_token" not in session and not is_demo():
         return jsonify({"error": "not authenticated"}), 401
-    activities = fetch_activities(months=24)
+    activities, enrichment, err = get_activities_and_enrichment()
+    if activities is None:
+        return "Rate limited — try again in 15 minutes.", 429
     stats = compute_stats(activities)
     buf = generate_card(stats["card_data"])
     athlete = session.get("athlete", {})
