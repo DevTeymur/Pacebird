@@ -526,6 +526,7 @@ def compute_stats(activities):
                     "label":   label,
                     "display": seconds_to_time(int(est_time)),
                     "speed":   spd,
+                    "id":      a.get("id"),
                 }
         if best:
             prs[label] = best
@@ -729,9 +730,23 @@ def compute_stats(activities):
         heatmap.append(round(km, 1))
 
     # ── PACE IMPROVEMENT ─────────────────────────────────────────
+    # Compare first-30-days avg pace vs last-30-days avg pace (min/km).
+    # Positive = got faster (old pace was slower, new pace is faster).
     pace_improvement = None
-    if len(pace_values) >= 2:
-        pace_improvement = round(pace_values[0] - pace_values[-1], 2)
+    runs_sorted_asc = sorted(runs, key=lambda a: a.get("start_date_local", ""))
+    if len(runs_sorted_asc) >= 6:
+        first_batch = runs_sorted_asc[:max(6, len(runs_sorted_asc) // 10)]
+        last_batch  = runs_sorted_asc[-max(6, len(runs_sorted_asc) // 10):]
+        def avg_pace(batch):
+            speeds = [a.get("average_speed", 0) for a in batch if a.get("average_speed", 0) > 0]
+            if not speeds:
+                return None
+            avg_spd = sum(speeds) / len(speeds)
+            return 1000 / 60 / avg_spd  # min/km
+        old_pace = avg_pace(first_batch)
+        new_pace = avg_pace(last_batch)
+        if old_pace and new_pace:
+            pace_improvement = round(old_pace - new_pace, 2)  # positive = faster now
 
     # ── RACE PREDICTOR ───────────────────────────────────────────
     predictor = {}
@@ -921,6 +936,7 @@ def compute_stats(activities):
                     "speed":   round(spd * 3.6, 1),
                     "date":    a.get("start_date_local", "")[:10],
                     "name":    a.get("name", ""),
+                    "id":      a.get("id"),
                 }
         if best:
             ride_prs[label] = best

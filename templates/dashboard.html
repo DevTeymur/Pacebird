@@ -503,7 +503,7 @@ tbody td { padding:11px 14px; vertical-align:middle; }
     <div class="chart-card">
       <div class="chart-title">Kilometres Run Each Month</div>
       <div class="chart-sub">Full history — scroll if needed</div>
-      <div class="chart-wrap tall scroll"><canvas id="monthlyChart"></canvas></div>
+      <div class="chart-wrap tall"><canvas id="monthlyChart"></canvas></div>
     </div>
 
     <div class="section-title">Pace & Distance</div>
@@ -547,7 +547,7 @@ tbody td { padding:11px 14px; vertical-align:middle; }
     <div class="chart-card wide">
       <div class="chart-title">Kilometres Cycled Each Month</div>
       <div class="chart-sub">Full history</div>
-      <div class="chart-wrap tall scroll"><canvas id="rideMonthlyChart"></canvas></div>
+      <div class="chart-wrap tall"><canvas id="rideMonthlyChart"></canvas></div>
     </div>
 
     <div class="section-title" style="margin-top:24px">Speed Trend</div>
@@ -1054,7 +1054,7 @@ function renderStats(s) {
       <div class="stats-grid">
         <div class="stat-row"><span class="stat-row-label">Current streak</span><div class="stat-row-right">
           ${s.streak_needs_today
-            ? `<div class="stat-row-value" style="color:#888">${s.current_streak} days ⬜ <span style="font-size:11px;font-weight:600;background:#f5f5f5;color:#888;padding:2px 8px;border-radius:8px;border:1px solid #e8e8e8">Train today to keep it</span></div>`
+            ? `<div class="stat-row-value" style="color:#1a1a2e">${s.current_streak} days &nbsp;<span style="font-size:11px;font-weight:700;background:#fff7ed;color:#b45309;padding:3px 9px;border-radius:8px;border:1px solid #fed7aa">train today !</span></div>`
             : `<div class="stat-row-value" style="color:#fc4c02">${s.current_streak} days 🔥</div>`}
         </div></div>
         <div class="stat-row"><span class="stat-row-label">Best streak ever</span><div class="stat-row-right"><div class="stat-row-value">${s.max_streak} days</div></div></div>
@@ -1080,11 +1080,11 @@ function renderPerfInsights(d) {
   if (d.stats && d.stats.current_streak>0) {
     const sNeedsToday = d.stats.streak_needs_today;
     cards.push({
-      icon: sNeedsToday ? '⬜' : '🔥',
+      icon: sNeedsToday ? '⏰' : '🔥',
       label: 'Current Streak',
-      color: sNeedsToday ? '' : 'highlight',
-      value: d.stats.current_streak + ' days' + (sNeedsToday ? '' : ' 🔥'),
-      sub: sNeedsToday ? '⚠️ Train today to keep it!' : `Best ever: ${d.stats.max_streak} days`
+      color: sNeedsToday ? 'yellow' : 'highlight',
+      value: d.stats.current_streak + ' days',
+      sub: sNeedsToday ? 'Train today to keep it!' : `Best ever: ${d.stats.max_streak} days`
     });
   }
   if (d.stats) cards.push({ icon:'📅', label:'Active Days', color:'', value:d.stats.active_days, sub:`${d.stats.dist_this_year} km so far this year` });
@@ -1293,7 +1293,8 @@ function render(d) {
   ['5K','10K','HM','Marathon'].forEach(key=>{
     const pr=d.prs[key]; if(!pr) return;
     const names={'5K':'5 km','10K':'10 km','HM':'Half Marathon','Marathon':'Marathon'};
-    ovPrGrid.innerHTML+=`<div class="pr-card"><div class="pr-badge">PR</div><div class="pr-label">${names[key]}</div><div class="pr-time">${pr.display}</div><div class="pr-pace">${pr.pace} /km</div><div class="pr-date">${pr.date}</div></div>`;
+    const ovClick=pr.id?`onclick="openActModal(${pr.id},'${(pr.name||'').replace(/'/g,"\\'")}','Run')" style="cursor:pointer" title="View activity"`:'';
+    ovPrGrid.innerHTML+=`<div class="pr-card" ${ovClick}><div class="pr-badge">PR</div><div class="pr-label">${names[key]}</div><div class="pr-time">${pr.display}</div><div class="pr-pace">${pr.pace} /km</div><div class="pr-date">${pr.date}${pr.id?` <span style="font-size:10px;color:#fc4c02">↗ tap</span>`:''}</div></div>`;
   });
 
   // ── RECENT ACTIVITIES ─────────────────────────────────────────
@@ -1331,7 +1332,8 @@ function render(d) {
   ['1K','5K','10K','15K','HM','Marathon'].forEach(key=>{
     const pr=d.prs[key]; if(!pr) return;
     const names={'1K':'1 km','5K':'5 km','10K':'10 km','15K':'15 km','HM':'Half Marathon','Marathon':'Marathon'};
-    prGrid.innerHTML+=`<div class="pr-card"><div class="pr-badge">PR</div><div class="pr-label">${names[key]}</div><div class="pr-time">${pr.display}</div><div class="pr-pace">${pr.pace} /km</div><div class="pr-date">${pr.date} · ${pr.name}</div></div>`;
+    const prClick=pr.id?`onclick="openActModal(${pr.id},'${(pr.name||'').replace(/'/g,"\\'")}','Run')" style="cursor:pointer" title="View this run"`:'';
+    prGrid.innerHTML+=`<div class="pr-card" ${prClick}><div class="pr-badge">PR</div><div class="pr-label">${names[key]}</div><div class="pr-time">${pr.display}</div><div class="pr-pace">${pr.pace} /km</div><div class="pr-date">${pr.date} · ${pr.name}${pr.id?` <span style="font-size:10px;color:#fc4c02">↗</span>`:''}</div></div>`;
   });
 
   // ── PREDICTOR ─────────────────────────────────────────────────
@@ -1360,9 +1362,7 @@ function render(d) {
   }
 
   // ── MONTHLY ───────────────────────────────────────────────────
-  const nM=d.monthly_labels.length, mW=Math.max(600,nM*36);
-  const mC=document.getElementById('monthlyChart'); mC.style.width=mW+'px'; mC.style.minWidth=mW+'px';
-  new Chart(mC,{type:'bar',data:{labels:d.monthly_labels,datasets:[{data:d.monthly_values,backgroundColor:barColors(d.monthly_values),borderRadius:7,borderSkipped:false}]},options:{responsive:false,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} km`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+'km'}},x:{grid:{display:false},ticks:{maxRotation:45,font:{size:10}}}}}});
+  new Chart(document.getElementById('monthlyChart'),{type:'bar',data:{labels:d.monthly_labels,datasets:[{data:d.monthly_values,backgroundColor:barColors(d.monthly_values),borderRadius:7,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} km`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+'km'}},x:{grid:{display:false},ticks:{maxRotation:45,maxTicksLimit:18,font:{size:10}}}}}});
 
   // ── PACE TREND ────────────────────────────────────────────────
   if(d.pace_values.length>0) new Chart(document.getElementById('paceChart'),{type:'line',data:{labels:d.pace_labels,datasets:[{data:d.pace_values,borderColor:C.orange,backgroundColor:'rgba(252,76,2,0.07)',borderWidth:2.5,pointRadius:2,fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} min/km`}}},scales:{y:{reverse:true,grid:{color:'#f5f5f5'},ticks:{callback:v=>v+' min/km'}},x:{grid:{display:false},ticks:{maxRotation:45,maxTicksLimit:8,font:{size:10}}}}}});
@@ -1382,7 +1382,8 @@ function render(d) {
     // Ride PRs
     const ridePrGrid=document.getElementById('ridePrGrid');
     Object.entries(d.ride_prs||{}).forEach(([dist,pr])=>{
-      ridePrGrid.innerHTML+=`<div class="pr-card"><div class="pr-badge">PR</div><div class="pr-label">${dist} ride</div><div class="pr-time">${pr.display}</div><div class="pr-pace">${pr.speed} km/h avg</div><div class="pr-date">${pr.date} · ${pr.name}</div></div>`;
+      const rPrClick=pr.id?`onclick="openActModal(${pr.id},'${(pr.name||'').replace(/'/g,"\\'")}','Ride')" style="cursor:pointer" title="View this ride"`:'';
+      ridePrGrid.innerHTML+=`<div class="pr-card" ${rPrClick}><div class="pr-badge">PR</div><div class="pr-label">${dist} ride</div><div class="pr-time">${pr.display}</div><div class="pr-pace">${pr.speed} km/h avg</div><div class="pr-date">${pr.date} · ${pr.name}${pr.id?` <span style="font-size:10px;color:#fc4c02">↗</span>`:''}</div></div>`;
     });
     // Ride yearly
     if(d.ride_years&&d.ride_years.length>0){
@@ -1393,9 +1394,7 @@ function render(d) {
     }
     // Ride monthly
     if(d.ride_monthly_labels&&d.ride_monthly_labels.length>0){
-      const rM=d.ride_monthly_labels.length, rW=Math.max(400,rM*36);
-      const rC=document.getElementById('rideMonthlyChart'); rC.style.width=rW+'px'; rC.style.minWidth=rW+'px';
-      new Chart(rC,{type:'bar',data:{labels:d.ride_monthly_labels,datasets:[{data:d.ride_monthly_values,backgroundColor:barColors(d.ride_monthly_values,'#9b5de5','#c79ef0','#e8d5ff'),borderRadius:6,borderSkipped:false}]},options:{responsive:false,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+'km'}},x:{grid:{display:false},ticks:{maxRotation:45,font:{size:10}}}}}});
+      new Chart(document.getElementById('rideMonthlyChart'),{type:'bar',data:{labels:d.ride_monthly_labels,datasets:[{data:d.ride_monthly_values,backgroundColor:barColors(d.ride_monthly_values,'#9b5de5','#c79ef0','#e8d5ff'),borderRadius:6,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} km`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+'km'}},x:{grid:{display:false},ticks:{maxRotation:45,maxTicksLimit:18,font:{size:10}}}}}});
     }
     // Speed trend
     if(d.ride_speed_values&&d.ride_speed_values.length>0) new Chart(document.getElementById('rideSpeedChart'),{type:'line',data:{labels:d.ride_speed_labels,datasets:[{data:d.ride_speed_values,borderColor:C.purple,backgroundColor:'rgba(155,93,229,0.07)',borderWidth:2.5,pointRadius:2,fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} km/h`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+' km/h'}},x:{grid:{display:false},ticks:{maxRotation:45,maxTicksLimit:8,font:{size:10}}}}}});
