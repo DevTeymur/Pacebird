@@ -87,7 +87,7 @@ def fetch_location(lat, lon):
         r = requests.get(
             "https://nominatim.openstreetmap.org/reverse",
             params={"lat": lat, "lon": lon, "format": "json"},
-            headers={"User-Agent": "StravaStatsDashboard/1.0"},
+            headers={"User-Agent": "Pacebird/1.0"},
             timeout=6,
         )
         d = r.json()
@@ -253,10 +253,22 @@ def get_activities_and_enrichment(force_refresh=False):
 
 @app.route("/favicon.ico")
 def favicon():
+    # Bird silhouette on orange circle — shows in browser tab properly
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
         '<circle cx="16" cy="16" r="16" fill="#fc4c02"/>'
-        '<text x="16" y="22" text-anchor="middle" font-size="18" fill="white">⚡</text>'
+        '<text x="16" y="22" text-anchor="middle" font-size="18" fill="white">🐦</text>'
+        '</svg>'
+    ).encode("utf-8")
+    return svg, 200, {"Content-Type": "image/svg+xml", "Cache-Control": "public,max-age=86400"}
+
+
+@app.route("/favicon.svg")
+def favicon_svg():
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+        '<circle cx="16" cy="16" r="16" fill="#fc4c02"/>'
+        '<text x="16" y="22" text-anchor="middle" font-size="18" fill="white">🐦</text>'
         '</svg>'
     ).encode("utf-8")
     return svg, 200, {"Content-Type": "image/svg+xml", "Cache-Control": "public,max-age=86400"}
