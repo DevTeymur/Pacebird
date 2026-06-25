@@ -45,7 +45,7 @@ cd pacebird
 ### 2. Install dependencies
 
 ```bash
-pip install flask requests python-dotenv pillow
+pip install -r requirements.txt
 ```
 
 ### 3. Create a Strava API app
@@ -74,8 +74,10 @@ FLASK_SECRET=any-random-string
 ### 5. Run
 
 ```bash
-python app.py
+./run.sh
 ```
+
+Or manually: `python app.py`
 
 Open [http://localhost:8080](http://localhost:8080) and connect your Strava.
 
@@ -86,6 +88,30 @@ http://localhost:8080/demo
 ```
 
 Loads ~700 synthetic activities so you can explore all features without connecting.
+
+---
+
+## Project Structure
+
+```
+pacebird/
+├── app.py              # Flask backend, all routes and data processing
+├── demo_data.py        # Synthetic activity generator for demo mode
+├── requirements.txt    # Python dependencies
+├── run.sh              # One-command startup script
+├── .env.example        # Environment variable template
+├── .env                # Your secrets — never commit this
+├── .gitignore
+├── templates/
+│   ├── login.html      # Connect with Strava page
+│   └── dashboard.html  # Main app UI (single-page, all tabs)
+├── static/             # Static assets
+├── .cache/             # Per-athlete activity cache — never commit this
+├── README.md
+├── CHANGELOG.md
+├── SECURITY.md
+└── LICENSE
+```
 
 ---
 
