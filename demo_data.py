@@ -121,6 +121,31 @@ def make_gym(act_id, date):
     }
 
 
+def make_swim(act_id, date, distance_m):
+    """Build a synthetic swim activity. Distance in metres, pace in min/100m."""
+    # Casual triathlete pace ~2:15/100m
+    pace_per_100m = random.uniform(1.9, 2.5)  # min/100m
+    moving_time = int(distance_m / 100 * pace_per_100m * 60)
+    hour = random.choice([6, 7, 8, 12, 18, 19])
+    return {
+        "id":               act_id,
+        "name":             random.choice(["Pool Swim", "Morning Swim", "Swim Session",
+                                           "Lane Swimming", "Swim Training", "Open Water Swim"]),
+        "sport_type":       "Swim",
+        "start_date_local": date.strftime(f"%Y-%m-%dT{hour:02d}:") + date.strftime("%M:%S"),
+        "distance":         distance_m,
+        "moving_time":      moving_time,
+        "elapsed_time":     moving_time + random.randint(300, 900),
+        "average_speed":    distance_m / moving_time if moving_time > 0 else 0,
+        "calories":         int(distance_m / 100 * random.uniform(25, 35)),
+        "suffer_score":     random.randint(30, 70),
+        "total_elevation_gain": 0,
+        "average_heartrate": random.randint(130, 155),
+        "max_heartrate":    random.randint(158, 175),
+        "start_latlng":     [],
+    }
+
+
 def make_squash(act_id, date):
     duration = random.randint(50, 90) * 60
     hour = random.choice([9, 10, 18, 19, 20])
@@ -176,6 +201,12 @@ def generate_demo_activities():
         squash_prob = 0.35 if month in [10, 11, 12, 1, 2, 3] else 0.15
         has_squash = random.random() < squash_prob
 
+        # Swim: ~1x/week with 40% chance, more in summer
+        swim_prob = 0.55 if month in [5, 6, 7, 8] else 0.35
+        has_swim = random.random() < swim_prob
+        # Occasionally do 2 swims in a week
+        has_swim2 = has_swim and random.random() < 0.25
+
         for offset in run_days:
             run_date = d + timedelta(days=offset)
             if run_date >= now:
@@ -222,6 +253,26 @@ def generate_demo_activities():
             sq_date = d + timedelta(days=sq_offset)
             if sq_date < now:
                 activities.append(make_squash(act_id, sq_date))
+                act_id += 1
+
+        if has_swim:
+            sw_offset = random.randint(0, 6)
+            sw_date = d + timedelta(days=sw_offset)
+            if sw_date < now:
+                # Distances: mostly 1K-2K, occasionally 2.5K+
+                sw_dist = random.choices(
+                    [500, 1000, 1500, 2000, 2500],
+                    weights=[5, 30, 35, 20, 10]
+                )[0]
+                activities.append(make_swim(act_id, sw_date, sw_dist))
+                act_id += 1
+
+        if has_swim2:
+            sw2_offset = random.randint(0, 6)
+            sw2_date = d + timedelta(days=sw2_offset)
+            if sw2_date < now:
+                sw2_dist = random.choices([750, 1000, 1500], weights=[20, 50, 30])[0]
+                activities.append(make_swim(act_id, sw2_date, sw2_dist))
                 act_id += 1
 
         d += timedelta(weeks=1)
