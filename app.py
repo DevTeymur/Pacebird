@@ -186,58 +186,93 @@ STRAVA_AUTH_URL  = "https://www.strava.com/oauth/authorize"
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_API_BASE  = "https://www.strava.com/api/v3"
 
-# Font paths (Lato shipped with most Linux/Mac; fallback to default)
-FONT_BOLD   = "/usr/share/fonts/truetype/lato/Lato-Bold.ttf"
-FONT_REGULAR= "/usr/share/fonts/truetype/lato/Lato-Regular.ttf"
-FONT_BLACK  = "/usr/share/fonts/truetype/lato/Lato-Black.ttf"
+# Font search — tries Mac system fonts, then Linux, then Pillow default
+def _find_font(*candidates):
+    """Return the first font path that exists on this system."""
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+# Bold / Black weight candidates (Mac → Linux → None)
+_BOLD_CANDIDATES = [
+    # Mac system fonts
+    "/Library/Fonts/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial.ttf",
+    "/System/Library/Fonts/Arial.ttf",
+    # Linux
+    "/usr/share/fonts/truetype/lato/Lato-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+]
+_REGULAR_CANDIDATES = [
+    "/Library/Fonts/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/lato/Lato-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+]
+
+FONT_BOLD    = _find_font(*_BOLD_CANDIDATES)
+FONT_REGULAR = _find_font(*_REGULAR_CANDIDATES)
+FONT_BLACK   = FONT_BOLD   # use bold as black fallback
 
 def _font(path, size):
+    if path:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    # Last resort: Pillow built-in (tiny but always works)
     try:
-        return ImageFont.truetype(path, size)
+        return ImageFont.load_default(size=size)
     except Exception:
         return ImageFont.load_default()
 
 
-# ─── VO2MAX / FITNESS AGE TABLES ──────────────────────────────────
-# VO2max norms by age (male) — from ACSM guidelines
-# Each entry: (age_min, age_max, poor, fair, good, excellent, superior)
-VO2_NORMS_MALE = [
-    (20, 29, 33, 37, 42, 48, 53),
-    (30, 39, 31, 35, 40, 45, 51),
-    (40, 49, 28, 33, 37, 42, 47),
-    (50, 59, 25, 30, 34, 39, 45),
-    (60, 69, 21, 26, 30, 35, 41),
+# ─── VO2MAX / FITNESS AGE ─────────────────────────────────────────
+# Norms: (age_midpoint, avg_upper_bound) — VO2max at which you are
+# "average" for that age group. Source: ACSM / Cooper Institute.
+# If your VO2max <= avg_upper for an age group, your fitness matches
+# that age group's average → fitness age = that midpoint.
+VO2_AVG_UPPER_MALE = [
+    (24, 41), (34, 39), (44, 36), (54, 33), (64, 29),
 ]
-VO2_NORMS_FEMALE = [
-    (20, 29, 28, 32, 36, 41, 45),
-    (30, 39, 26, 30, 34, 38, 43),
-    (40, 49, 24, 27, 31, 36, 41),
-    (50, 59, 21, 24, 28, 32, 37),
-    (60, 69, 18, 21, 24, 29, 35),
+VO2_AVG_UPPER_FEMALE = [
+    (24, 36), (34, 34), (44, 31), (54, 28), (64, 25),
 ]
 
-def estimate_vo2max(best_speed_ms):
-    """Rough VO2max from best 5K-ish speed using simplified Jack Daniels."""
-    if not best_speed_ms or best_speed_ms <= 0:
+import math as _math
+
+def estimate_vo2max(best_5k_speed_ms, best_5k_dist=5000):
+    """
+    Correct Jack Daniels VDOT formula from race performance.
+    best_5k_speed_ms: average m/s of the fastest run >= 4.5 km.
+    """
+    if not best_5k_speed_ms or best_5k_speed_ms <= 0:
         return None
-    pace_min_km = (1000 / best_speed_ms) / 60
-    # VO2 = -4.6 + 0.182258*velocity + 0.000104*velocity^2  (velocity in m/min)
-    v = best_speed_ms * 60  # m/min
-    vo2 = -4.6 + 0.182258 * v + 0.000104 * v ** 2
-    # % VO2max at easy pace correction (assume running at ~75% VO2max)
-    vo2max = vo2 / 0.75
-    return round(max(20, min(80, vo2max)), 1)
+    # Estimate race time for the target distance at that speed
+    t_min = best_5k_dist / best_5k_speed_ms / 60.0
+    v = best_5k_dist / t_min  # m/min
+    # % VO2max sustained at race duration (Daniels & Gilbert)
+    pct = (0.8 + 0.1894393 * _math.exp(-0.012778 * t_min)
+               + 0.2989558 * _math.exp(-0.1932605 * t_min))
+    vo2_at_v = -4.60 + 0.182258 * v + 0.000104 * v ** 2
+    vo2max = vo2_at_v / pct
+    return round(max(20, min(85, vo2max)), 1)
 
 def fitness_age(vo2max, actual_age, gender="M"):
-    """Returns estimated fitness age given VO2max."""
-    norms = VO2_NORMS_MALE if gender == "M" else VO2_NORMS_FEMALE
-    # Find which age bracket the VO2max fits into as "good" or better
-    for (age_min, age_max, poor, fair, good, excellent, superior) in norms:
-        if vo2max >= good:
-            mid = (age_min + age_max) // 2
-            return mid
-    # If below all "good" levels, fitness age = actual age + penalty
-    return min(actual_age + 10, 70)
+    """
+    Return the youngest age group whose average VO2max the athlete matches.
+    E.g. VO2max=34 matches the average of the 20-29 group → fitness age 24.
+    """
+    norms = VO2_AVG_UPPER_MALE if gender == "M" else VO2_AVG_UPPER_FEMALE
+    for (age_mid, avg_upper) in norms:
+        if vo2max <= avg_upper:
+            return age_mid
+    # Above all averages — fitter than average 64yo → use lowest bracket
+    return norms[0][0]
 
 
 # ─── DEMO HELPERS ─────────────────────────────────────────────────
@@ -262,6 +297,18 @@ def get_activities_and_enrichment(force_refresh=False):
 
 
 # ─── AUTH ─────────────────────────────────────────────────────────
+
+@app.route("/favicon.ico")
+def favicon():
+    # Return a minimal orange SVG circle as favicon
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+        '<circle cx="16" cy="16" r="16" fill="#fc4c02"/>'
+        '<text x="16" y="22" text-anchor="middle" font-size="18" fill="white">⚡</text>'
+        '</svg>'
+    ).encode("utf-8")
+    return svg, 200, {"Content-Type": "image/svg+xml", "Cache-Control": "public,max-age=86400"}
+
 
 @app.route("/api/debug")
 def api_debug():
@@ -299,6 +346,8 @@ def api_debug():
             "cache_exists":       cache_exists,
             "cache_size_kb":      round(cache_size / 1024, 1),
             "cache_dir_files":    _glob.glob(os.path.join(CACHE_DIR, "*")),
+            "font_bold":          FONT_BOLD,
+            "font_regular":       FONT_REGULAR,
             "response_preview":   r.json() if r.status_code == 200 else r.text[:300],
         })
     except requests.exceptions.Timeout:
@@ -376,7 +425,7 @@ def get_headers():
     return {"Authorization": f"Bearer {session['access_token']}"}
 
 
-FETCH_MONTHS = 2   # change to 24 later once caching is confirmed working
+FETCH_MONTHS = 24
 
 def fetch_activities(months=None, force_refresh=False):
     # Demo mode — never hit the network
@@ -627,13 +676,24 @@ def compute_stats(activities):
     top_sports = sorted(sport_counts.items(), key=lambda x: -x[1])[:6]
 
     # ── CALORIE BY SPORT ─────────────────────────────────────────
+    # MET (metabolic equivalent) estimates per sport for fallback
+    MET = {"Run": 9.8, "WeightTraining": 5.0, "Squash": 10.0,
+           "Ride": 7.5, "Walk": 3.8, "Swim": 8.0, "Hike": 6.0}
+    BODY_WEIGHT_KG = 70  # reasonable default
+
     cal_sport = defaultdict(list)
     for a in activities:
         sport = a.get("sport_type", "Other")
-        cals = a.get("calories", 0)
-        mins = a.get("moving_time", 0) / 60
-        if cals > 0 and mins > 0:
-            cal_sport[sport].append(cals / mins * 60)
+        mins  = a.get("moving_time", 0) / 60
+        if mins <= 0:
+            continue
+        cals = a.get("calories") or 0
+        # Strava list endpoint often omits calories — estimate from MET if missing
+        if cals <= 0:
+            met = MET.get(sport, 5.0)
+            cals = met * BODY_WEIGHT_KG * (mins / 60)
+        cal_sport[sport].append(cals / mins * 60)  # kcal/hr
+
     cal_labels, cal_values = [], []
     for sport, vals in sorted(cal_sport.items(), key=lambda x: -sum(x[1]) / len(x[1]))[:6]:
         cal_labels.append(sport)
