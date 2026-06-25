@@ -3,9 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>StravaStats Dashboard</title>
-<link rel="icon" href="/favicon.ico" type="image/svg+xml">
+<title>Pacebird</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/favicon.ico">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#f7f8fa; color:#1a1a2e; }
@@ -13,35 +16,56 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 /* ── HEADER ── */
 .header {
   background:#fff; border-bottom:1px solid #eee;
-  padding:16px 40px; display:flex; align-items:center; gap:14px;
-  position:sticky; top:0; z-index:100;
+  padding:14px 32px; display:flex; align-items:center; gap:12px;
+  position:sticky; top:0; z-index:200;
 }
-.avatar {
-  width:40px; height:40px; border-radius:50%;
+.header-logo { font-size:22px; font-weight:900; color:#fc4c02; letter-spacing:-0.5px; }
+.header-spacer { flex:1; }
+.header-actions { display:flex; align-items:center; gap:8px; }
+.btn-sm {
+  font-size:12px; color:#888; padding:6px 13px;
+  border:1px solid #eee; border-radius:8px; background:none; cursor:pointer;
+  transition:color .15s, border-color .15s; white-space:nowrap;
+}
+.btn-sm:hover { color:#fc4c02; border-color:#fc4c02; }
+
+/* Profile picture */
+.profile-btn { position:relative; cursor:pointer; }
+.profile-avatar {
+  width:36px; height:36px; border-radius:50%;
   background:linear-gradient(135deg,#fc4c02,#ff8c42);
   display:flex; align-items:center; justify-content:center;
-  color:#fff; font-weight:700; font-size:15px; flex-shrink:0;
+  color:#fff; font-weight:700; font-size:14px;
+  border:2px solid #fff; box-shadow:0 0 0 2px #fc4c02; overflow:hidden;
 }
-.header-name { font-size:15px; font-weight:700; }
-.header-sub  { font-size:12px; color:#aaa; }
-.logout {
-  margin-left:auto; font-size:12px; color:#aaa;
-  text-decoration:none; padding:7px 14px;
-  border:1px solid #eee; border-radius:8px; white-space:nowrap;
+.profile-avatar img { width:100%; height:100%; object-fit:cover; }
+.profile-card {
+  display:none; position:absolute; top:calc(100% + 10px); right:0;
+  background:#fff; border:1px solid #eee; border-radius:14px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.12); padding:20px; min-width:200px; z-index:500;
 }
-.logout:hover { color:#fc4c02; border-color:#fc4c02; }
+.profile-card.open { display:block; }
+.pc-name { font-size:16px; font-weight:800; margin-bottom:2px; }
+.pc-loc  { font-size:12px; color:#aaa; margin-bottom:14px; }
+.pc-row  { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid #f5f5f5; font-size:12px; color:#666; }
+.pc-row:last-of-type { border-bottom:none; }
+.pc-row span:last-child { font-weight:700; color:#1a1a2e; }
+.pc-actions { margin-top:14px; display:flex; gap:8px; }
+.pc-btn { flex:1; padding:8px; border-radius:8px; font-size:12px; font-weight:700; text-align:center; cursor:pointer; text-decoration:none; border:none; }
+.pc-btn-refresh { background:#f7f8fa; color:#1a1a2e; border:1px solid #eee; }
+.pc-btn-refresh:hover { border-color:#fc4c02; color:#fc4c02; }
+.pc-btn-logout { background:#fc4c02; color:#fff; }
 
 /* ── TABS ── */
 .tabs-bar {
   background:#fff; border-bottom:1px solid #eee;
-  padding:0 40px; display:flex; gap:0; overflow-x:auto;
-  position:sticky; top:65px; z-index:99;
+  padding:0 32px; display:flex; gap:0; overflow-x:auto;
+  position:sticky; top:57px; z-index:199;
 }
 .tab-btn {
-  padding:14px 20px; font-size:13px; font-weight:600;
+  padding:13px 18px; font-size:13px; font-weight:600;
   color:#aaa; border:none; background:none; cursor:pointer;
-  border-bottom:3px solid transparent; white-space:nowrap;
-  transition:color 0.15s;
+  border-bottom:3px solid transparent; white-space:nowrap; transition:color 0.15s;
 }
 .tab-btn:hover { color:#1a1a2e; }
 .tab-btn.active { color:#fc4c02; border-bottom-color:#fc4c02; }
@@ -49,19 +73,12 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 .tab-panel.active { display:block; }
 
 /* ── LOADING ── */
-.loading {
-  min-height:60vh; display:flex; flex-direction:column;
-  align-items:center; justify-content:center; gap:16px;
-}
-.spinner {
-  width:36px; height:36px; border:3px solid #f0f0f0;
-  border-top-color:#fc4c02; border-radius:50%;
-  animation:spin 0.8s linear infinite;
-}
+.loading { min-height:60vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; }
+.spinner { width:36px; height:36px; border:3px solid #f0f0f0; border-top-color:#fc4c02; border-radius:50%; animation:spin 0.8s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 
 /* ── LAYOUT ── */
-.container { max-width:1200px; margin:0 auto; padding:28px 24px; }
+.container { max-width:1200px; margin:0 auto; padding:26px 24px; }
 .section-title {
   font-size:11px; font-weight:700; text-transform:uppercase;
   letter-spacing:1.2px; color:#bbb; margin-bottom:14px; margin-top:32px;
@@ -70,10 +87,7 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 
 /* ── STAT CARDS ── */
 .cards-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
-.card {
-  background:#fff; border-radius:14px; padding:20px 18px;
-  border:1px solid #efefef; transition:box-shadow 0.2s;
-}
+.card { background:#fff; border-radius:14px; padding:20px 18px; border:1px solid #efefef; transition:box-shadow 0.2s; }
 .card:hover { box-shadow:0 4px 20px rgba(0,0,0,0.06); }
 .card-label { font-size:11px; color:#bbb; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:7px; }
 .card-value { font-size:26px; font-weight:800; line-height:1; }
@@ -83,18 +97,48 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 .c-green  { border-top:3px solid #06d6a0; }
 .c-purple { border-top:3px solid #9b5de5; }
 .c-yellow { border-top:3px solid #ffd166; }
+.c-teal   { border-top:3px solid #00b4d8; }
+
+/* ── RECENT ACTIVITIES ── */
+.recent-list { display:flex; flex-direction:column; gap:8px; }
+.recent-item {
+  background:#fff; border-radius:12px; padding:14px 18px;
+  border:1px solid #efefef; display:flex; align-items:center; gap:14px;
+  transition:box-shadow .15s; cursor:pointer;
+}
+.recent-item:hover { box-shadow:0 2px 12px rgba(0,0,0,0.07); border-color:#fc4c02; }
+.recent-sport-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+.recent-name { font-size:13px; font-weight:700; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.recent-meta { font-size:12px; color:#aaa; white-space:nowrap; }
+.recent-badge { font-size:11px; font-weight:700; padding:2px 8px; border-radius:8px; white-space:nowrap; }
+
+/* ── THIS WEEK VS LAST ── */
+.week-compare {
+  background:#fff; border-radius:14px; border:1px solid #efefef; padding:22px 24px;
+}
+.wc-header { display:grid; grid-template-columns:1fr 120px 120px 60px; gap:0; padding-bottom:10px; border-bottom:1px solid #f5f5f5; margin-bottom:4px; }
+.wc-header-label { font-size:11px; color:#bbb; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; }
+.wc-header-label.this { color:#fc4c02; }
+.wc-row { display:grid; grid-template-columns:1fr 120px 120px 60px; gap:0; align-items:center; padding:9px 0; border-bottom:1px solid #f9f9f9; }
+.wc-row:last-child { border-bottom:none; }
+.wc-row-label { font-size:13px; color:#888; }
+.wc-cell { font-size:18px; font-weight:800; }
+.wc-cell.dim { color:#ccc; font-size:16px; font-weight:600; }
+.wc-delta { font-size:11px; font-weight:700; padding:2px 7px; border-radius:8px; }
+.delta-up   { background:#f0fefa; color:#06d6a0; }
+.delta-down { background:#fff0eb; color:#fc4c02; }
+.delta-flat { background:#f5f5f5; color:#aaa; }
 
 /* ── PR CARDS ── */
-.pr-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; }
+.pr-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; }
 .pr-card {
   background:#fff; border-radius:14px; padding:20px 18px;
-  border:1px solid #efefef; position:relative; overflow:hidden;
-  transition:box-shadow 0.2s;
+  border:1px solid #efefef; position:relative; overflow:hidden; transition:box-shadow 0.2s;
 }
 .pr-card:hover { box-shadow:0 4px 20px rgba(0,0,0,0.06); }
 .pr-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg,#fc4c02,#ff8c42); }
 .pr-label { font-size:11px; font-weight:700; color:#bbb; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:10px; }
-.pr-time  { font-size:28px; font-weight:800; line-height:1; }
+.pr-time  { font-size:26px; font-weight:800; line-height:1; }
 .pr-pace  { font-size:12px; color:#aaa; margin-top:6px; }
 .pr-date  { font-size:11px; color:#ddd; margin-top:3px; }
 .pr-badge { position:absolute; top:14px; right:12px; background:#fff7f4; color:#fc4c02; font-size:9px; font-weight:700; padding:2px 7px; border-radius:8px; border:1px solid #ffd9cc; }
@@ -107,46 +151,12 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 .chart-title { font-size:14px; font-weight:700; margin-bottom:3px; }
 .chart-sub   { font-size:12px; color:#bbb; margin-bottom:16px; }
 .chart-wrap  { position:relative; height:210px; }
-.chart-wrap.tall { height:250px; }
-
-/* ── FITNESS AGE ── */
-.fa-card {
-  background:#1a1a2e; border-radius:14px; padding:28px 32px;
-  display:flex; align-items:flex-start; gap:40px; flex-wrap:wrap;
-}
-.fa-score { text-align:center; min-width:120px; }
-.fa-number { font-size:80px; font-weight:800; color:#fc4c02; line-height:1; }
-.fa-unit   { font-size:12px; color:#666; margin-top:4px; text-transform:uppercase; letter-spacing:0.5px; }
-.fa-details { flex:1; min-width:220px; }
-.fa-details h3 { font-size:17px; font-weight:700; color:#fff; margin-bottom:14px; line-height:1.4; }
-.fa-row { display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid #2a2a4e; font-size:13px; }
-.fa-row:last-child { border-bottom:none; }
-.fa-row span:first-child { color:#666; }
-.fa-row span:last-child  { color:#fff; font-weight:600; }
-.fa-younger { color:#06d6a0 !important; }
-.fa-older   { color:#ff5050 !important; }
-.fa-form { margin-top:20px; }
-.fa-form label { font-size:12px; color:#888; display:block; margin-bottom:8px; }
-.fa-form-row { display:flex; gap:8px; }
-.fa-form input {
-  flex:1; padding:11px 14px; border-radius:8px;
-  border:1px solid #2a2a4e; background:#2a2a4e;
-  color:#fff; font-size:14px; outline:none;
-}
-.fa-form input:focus { border-color:#fc4c02; }
-.fa-form button {
-  padding:11px 20px; border-radius:8px; border:none;
-  background:#fc4c02; color:#fff; font-size:13px; font-weight:700;
-  cursor:pointer; white-space:nowrap;
-}
-.fa-form button:hover { background:#e04400; }
+.chart-wrap.tall  { height:260px; }
+.chart-wrap.xtall { height:320px; }
+.chart-wrap.scroll { overflow-x:auto; }
 
 /* ── SWEET SPOT ── */
-.sweet-badge {
-  display:inline-block; background:#fc4c02; color:#fff;
-  font-size:10px; font-weight:700; padding:2px 9px;
-  border-radius:8px; margin-left:8px; vertical-align:middle;
-}
+.sweet-badge { display:inline-block; background:#fc4c02; color:#fff; font-size:10px; font-weight:700; padding:2px 9px; border-radius:8px; margin-left:8px; vertical-align:middle; }
 
 /* ── PREDICTOR ── */
 .predictor-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; }
@@ -156,438 +166,590 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 .pred-note { font-size:11px; color:#ddd; margin-top:4px; }
 
 /* ── TIME OF DAY ── */
-.tod-best {
-  background:linear-gradient(135deg,#fc4c02,#ff8c42);
-  color:#fff; border-radius:14px; padding:20px 28px;
-  display:flex; align-items:center; gap:16px;
-}
-.tod-icon { font-size:32px; }
+.tod-best { background:linear-gradient(135deg,#fc4c02,#ff8c42); color:#fff; border-radius:14px; padding:20px 28px; display:flex; align-items:center; gap:16px; }
+.tod-icon  { font-size:32px; }
 .tod-label { font-size:11px; font-weight:700; opacity:0.8; margin-bottom:4px; letter-spacing:0.5px; }
 .tod-value { font-size:20px; font-weight:800; }
 .tod-sub   { font-size:12px; opacity:0.75; margin-top:2px; }
 
 /* ── HEATMAP ── */
-.heatmap-grid { display:flex; gap:3px; overflow-x:auto; padding-bottom:4px; }
-.hm-col { display:flex; flex-direction:column; gap:3px; }
-.hm-cell { width:12px; height:12px; border-radius:2px; background:#f0f0f0; cursor:default; }
+.heatmap-wrap { overflow-x:auto; padding-bottom:4px; }
+.heatmap-grid { display:flex; gap:4px; min-width:max-content; }
+.hm-col  { display:flex; flex-direction:column; gap:4px; }
+.hm-cell { width:14px; height:14px; border-radius:3px; background:#f0f0f0; cursor:default; transition:transform .1s; }
+.hm-cell:hover { transform:scale(1.3); }
 .hm-cell.l1 { background:#ffd0b8; }
 .hm-cell.l2 { background:#ff8c42; }
 .hm-cell.l3 { background:#fc4c02; }
 .hm-cell.l4 { background:#a62b00; }
-.hm-legend { display:flex; align-items:center; gap:5px; margin-top:8px; font-size:11px; color:#bbb; }
-.hm-leg-cell { width:12px; height:12px; border-radius:2px; }
+.hm-legend { display:flex; align-items:center; gap:6px; margin-top:10px; font-size:11px; color:#bbb; }
+.hm-leg-cell { width:14px; height:14px; border-radius:3px; }
 
-/* ── SHARE ── */
-.share-card {
-  background:linear-gradient(135deg,#1a1a2e,#2a1a3e);
-  border-radius:16px; padding:32px 36px;
-  display:flex; align-items:center; gap:32px; flex-wrap:wrap;
+/* ── YEAR LEGEND ── */
+.year-colors { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px; }
+.year-dot { display:flex; align-items:center; gap:5px; font-size:12px; color:#666; }
+.year-dot-circle { width:10px; height:10px; border-radius:50%; }
+
+/* ── SHARE FAB ── */
+.share-fab {
+  position:fixed; bottom:28px; right:28px; z-index:300;
+  background:#fc4c02; color:#fff; border:none; border-radius:50px;
+  padding:13px 22px; font-size:14px; font-weight:700;
+  cursor:pointer; box-shadow:0 4px 20px rgba(252,76,2,0.4);
+  display:flex; align-items:center; gap:8px;
+  transition:background .2s, transform .15s;
 }
-.share-icon { font-size:64px; flex-shrink:0; }
-.share-text h3 { font-size:20px; font-weight:800; color:#fff; margin-bottom:8px; }
-.share-text p  { font-size:13px; color:#888; line-height:1.6; margin-bottom:20px; max-width:420px; }
-.share-btn {
-  display:inline-flex; align-items:center; gap:8px;
-  background:#fc4c02; color:#fff; font-size:14px; font-weight:700;
-  padding:14px 28px; border-radius:10px; text-decoration:none;
-  border:none; cursor:pointer; transition:background 0.2s;
-}
+.share-fab:hover { background:#e04400; transform:translateY(-2px); }
+
+/* ── MODAL ── */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:400; align-items:center; justify-content:center; }
+.modal-overlay.open { display:flex; }
+.modal { background:#fff; border-radius:20px; padding:36px 40px; max-width:480px; width:90%; position:relative; box-shadow:0 20px 60px rgba(0,0,0,0.2); }
+.modal-close { position:absolute; top:14px; right:18px; font-size:22px; color:#ccc; cursor:pointer; background:none; border:none; line-height:1; }
+.modal-close:hover { color:#fc4c02; }
+.share-btn { display:inline-flex; align-items:center; gap:8px; background:#fc4c02; color:#fff; font-size:14px; font-weight:700; padding:14px 28px; border-radius:10px; border:none; cursor:pointer; }
 .share-btn:hover { background:#e04400; }
-.share-loading { opacity:0.7; pointer-events:none; }
 
-.footer { text-align:center; padding:32px; font-size:12px; color:#ddd; }
+/* ── ACTIVITY DETAIL MODAL ── */
+.act-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:600; align-items:center; justify-content:center; padding:20px; }
+.act-modal-overlay.open { display:flex; }
+.act-modal {
+  background:#fff; border-radius:20px; width:100%; max-width:900px; max-height:90vh;
+  overflow:hidden; display:grid; grid-template-columns:1fr 1fr;
+  box-shadow:0 24px 80px rgba(0,0,0,0.3); position:relative;
+}
+@media(max-width:700px){ .act-modal{ grid-template-columns:1fr; } }
+.act-map { height:100%; min-height:300px; background:#e8e8e8; position:relative; }
+.act-map-inner { width:100%; height:100%; min-height:300px; }
+.act-map-placeholder { display:flex; align-items:center; justify-content:center; height:100%; min-height:300px; color:#aaa; font-size:13px; flex-direction:column; gap:8px; }
+.act-detail { padding:28px; overflow-y:auto; max-height:90vh; }
+.act-close { position:absolute; top:14px; right:14px; z-index:10; background:#fff; border:none; border-radius:50%; width:32px; height:32px; font-size:18px; cursor:pointer; line-height:32px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.15); color:#666; }
+.act-close:hover { color:#fc4c02; }
+.act-name { font-size:18px; font-weight:800; margin-bottom:4px; }
+.act-sport { font-size:12px; color:#aaa; margin-bottom:20px; }
+.act-stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; }
+.act-stat { background:#f7f8fa; border-radius:10px; padding:12px 14px; }
+.act-stat-label { font-size:10px; color:#bbb; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
+.act-stat-value { font-size:18px; font-weight:800; }
+.act-splits { margin-top:16px; }
+.act-splits h4 { font-size:12px; font-weight:700; color:#bbb; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; }
+.split-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid #f5f5f5; font-size:12px; }
+.split-row:last-child { border-bottom:none; }
+.act-strava-link { display:inline-flex; align-items:center; gap:6px; margin-top:16px; background:#fc4c02; color:#fff; padding:9px 16px; border-radius:8px; font-size:12px; font-weight:700; text-decoration:none; }
+.act-strava-link:hover { background:#e04400; }
+.act-loading { text-align:center; padding:40px; color:#aaa; }
 
 /* ── ACTIVITIES TABLE ── */
-.tbl-toolbar {
-  display:flex; gap:10px; flex-wrap:wrap; align-items:center;
-  margin-bottom:16px;
-}
-.tbl-search {
-  flex:1; min-width:180px; padding:9px 14px;
-  border:1px solid #e8e8e8; border-radius:8px;
-  font-size:13px; outline:none; background:#fff;
-}
+.tbl-toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+.tbl-search { flex:1; min-width:160px; padding:8px 13px; border:1px solid #e8e8e8; border-radius:8px; font-size:13px; outline:none; background:#fff; }
 .tbl-search:focus { border-color:#fc4c02; }
-.tbl-select {
-  padding:9px 12px; border:1px solid #e8e8e8; border-radius:8px;
-  font-size:13px; background:#fff; outline:none; cursor:pointer;
-}
+.tbl-select { padding:8px 11px; border:1px solid #e8e8e8; border-radius:8px; font-size:13px; background:#fff; outline:none; cursor:pointer; }
 .tbl-select:focus { border-color:#fc4c02; }
-.tbl-count { font-size:12px; color:#bbb; margin-left:auto; white-space:nowrap; }
+.tbl-range-group { display:flex; align-items:center; gap:4px; font-size:12px; color:#aaa; }
+.tbl-range-input { width:70px; padding:7px 9px; border:1px solid #e8e8e8; border-radius:8px; font-size:12px; background:#fff; outline:none; }
+.tbl-range-input:focus { border-color:#fc4c02; }
+.tbl-count { font-size:12px; color:#bbb; white-space:nowrap; }
 .tbl-wrap { overflow-x:auto; border-radius:12px; border:1px solid #efefef; background:#fff; }
 table { width:100%; border-collapse:collapse; font-size:13px; }
-thead th {
-  padding:11px 14px; text-align:left; font-size:11px; font-weight:700;
-  text-transform:uppercase; letter-spacing:0.5px; color:#bbb;
-  background:#fafafa; border-bottom:1px solid #f0f0f0;
-  cursor:pointer; user-select:none; white-space:nowrap;
-}
+thead th { padding:11px 14px; text-align:left; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:#bbb; background:#fafafa; border-bottom:1px solid #f0f0f0; cursor:pointer; user-select:none; white-space:nowrap; }
 thead th:hover { color:#1a1a2e; }
 thead th.sort-asc::after  { content:' ↑'; color:#fc4c02; }
 thead th.sort-desc::after { content:' ↓'; color:#fc4c02; }
-tbody tr { border-bottom:1px solid #f8f8f8; transition:background 0.1s; }
+tbody tr { border-bottom:1px solid #f8f8f8; transition:background 0.1s; cursor:pointer; }
 tbody tr:last-child { border-bottom:none; }
 tbody tr:hover { background:#fffaf8; }
 tbody td { padding:11px 14px; vertical-align:middle; }
-.sport-badge {
-  display:inline-block; padding:2px 9px; border-radius:8px;
-  font-size:11px; font-weight:700; white-space:nowrap;
-}
-.sport-Run          { background:#fff0eb; color:#fc4c02; }
+.sport-badge { display:inline-block; padding:2px 9px; border-radius:8px; font-size:11px; font-weight:700; white-space:nowrap; }
+.sport-Run { background:#fff0eb; color:#fc4c02; }
 .sport-WeightTraining { background:#eef4ff; color:#3a86ff; }
-.sport-Squash       { background:#eefffa; color:#06d6a0; }
-.sport-Ride         { background:#f5eeff; color:#9b5de5; }
-.sport-Other        { background:#f5f5f5; color:#999; }
-.tbl-name { font-weight:600; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sport-Squash { background:#eefffa; color:#06d6a0; }
+.sport-Ride { background:#f5eeff; color:#9b5de5; }
+.sport-Swim { background:#e0f7ff; color:#00b4d8; }
+.sport-Other { background:#f5f5f5; color:#999; }
+.tbl-name { font-weight:600; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tbl-link { color:inherit; text-decoration:none; }
 .tbl-link:hover { color:#fc4c02; }
 .tbl-empty { text-align:center; padding:48px; color:#bbb; font-size:14px; }
 .tbl-pagination { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-top:1px solid #f0f0f0; background:#fafafa; border-radius:0 0 12px 12px; }
 .tbl-page-info { font-size:12px; color:#bbb; }
 .tbl-page-btns { display:flex; gap:6px; }
-.tbl-page-btn {
-  padding:5px 12px; border-radius:6px; border:1px solid #e8e8e8;
-  font-size:12px; background:#fff; cursor:pointer; color:#666;
-}
+.tbl-page-btn { padding:5px 12px; border-radius:6px; border:1px solid #e8e8e8; font-size:12px; background:#fff; cursor:pointer; color:#666; }
 .tbl-page-btn:hover:not(:disabled) { border-color:#fc4c02; color:#fc4c02; }
 .tbl-page-btn:disabled { opacity:0.4; cursor:default; }
 
-/* ── ENRICHMENT PROGRESS ── */
-.enrich-bar-wrap {
-  background:#fff; border:1px solid #efefef; border-radius:12px;
-  padding:14px 18px; margin-bottom:16px; display:flex;
-  align-items:center; gap:14px;
-}
-.enrich-bar-track {
-  flex:1; height:6px; background:#f0f0f0; border-radius:4px; overflow:hidden;
-}
-.enrich-bar-fill {
-  height:100%; background:linear-gradient(90deg,#fc4c02,#ff8c42);
-  border-radius:4px; transition:width 0.4s;
-}
+/* ── ENRICHMENT ── */
+.enrich-bar-wrap { background:#fff; border:1px solid #efefef; border-radius:12px; padding:14px 18px; margin-bottom:16px; display:flex; align-items:center; gap:14px; }
+.enrich-bar-track { flex:1; height:6px; background:#f0f0f0; border-radius:4px; overflow:hidden; }
+.enrich-bar-fill  { height:100%; background:linear-gradient(90deg,#fc4c02,#ff8c42); border-radius:4px; transition:width 0.4s; }
 .enrich-status { font-size:12px; color:#bbb; white-space:nowrap; }
 
-/* ── WEATHER CARDS ── */
-.weather-best {
-  display:flex; gap:14px; flex-wrap:wrap; margin-bottom:20px;
+/* ── INSIGHT CARDS ── */
+.insight-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:24px; }
+.insight-card { background:#fff; border-radius:14px; padding:22px 18px; border:1px solid #efefef; }
+.insight-card.highlight { border-color:#fc4c02; background:#fff9f7; }
+.insight-card.green  { border-color:#06d6a0; background:#f0fefa; }
+.insight-card.blue   { border-color:#3a86ff; background:#f0f5ff; }
+.insight-card.purple { border-color:#9b5de5; background:#f5f0ff; }
+.ic-icon  { font-size:22px; margin-bottom:8px; }
+.ic-label { font-size:11px; font-weight:700; color:#bbb; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+.ic-value { font-size:22px; font-weight:800; line-height:1.2; margin-bottom:4px; }
+.ic-sub   { font-size:12px; color:#aaa; }
+
+/* ── STATS TAB ── */
+.stats-section { margin-bottom:24px; }
+.stats-section-header {
+  display:flex; align-items:center; gap:10px;
+  font-size:13px; font-weight:700; color:#1a1a2e;
+  margin-bottom:12px; padding:10px 16px;
+  background:#fff; border-radius:10px; border:1px solid #efefef;
 }
-.weather-best-card {
-  flex:1; min-width:200px; background:#fff;
-  border:1px solid #efefef; border-radius:14px; padding:20px 18px;
-}
-.weather-best-card.highlight { border-color:#fc4c02; background:#fff9f7; }
-.wb-label { font-size:11px; font-weight:700; color:#bbb; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
-.wb-value { font-size:22px; font-weight:800; }
-.wb-sub   { font-size:12px; color:#aaa; margin-top:4px; }
+.stats-section-header .s-icon { font-size:20px; }
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; }
+.stat-row { background:#fff; border-radius:10px; padding:14px 18px; border:1px solid #efefef; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.stat-row-label { font-size:13px; color:#666; }
+.stat-row-right { text-align:right; }
+.stat-row-value { font-size:15px; font-weight:800; color:#1a1a2e; }
+.stat-row-sub   { font-size:11px; color:#bbb; margin-top:1px; }
+.stat-hero { background:linear-gradient(135deg,#fc4c02,#ff8c42); border-radius:14px; padding:24px 28px; color:#fff; display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:20px; margin-bottom:20px; }
+.stat-hero-item .label { font-size:11px; opacity:0.8; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
+.stat-hero-item .value { font-size:26px; font-weight:800; }
+.stat-hero-item .sub   { font-size:11px; opacity:0.7; margin-top:2px; }
+
+/* ── ACHIEVEMENTS ── */
+.ach-filter { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
+.ach-filter-btn { padding:6px 14px; border-radius:20px; font-size:12px; font-weight:600; border:1px solid #eee; background:#fff; cursor:pointer; color:#888; transition:all .15s; }
+.ach-filter-btn.active { background:#fc4c02; color:#fff; border-color:#fc4c02; }
+.ach-section-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.8px; color:#bbb; margin:20px 0 12px; display:flex; align-items:center; gap:8px; }
+.ach-section-title::after { content:''; flex:1; height:1px; background:#f0f0f0; }
+.ach-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; }
+.ach-card { background:#fff; border-radius:16px; padding:20px 16px; border:2px solid #efefef; text-align:center; position:relative; transition:box-shadow .2s, transform .15s; }
+.ach-card.unlocked { border-color:#fc4c02; }
+.ach-card.unlocked:hover { box-shadow:0 4px 20px rgba(252,76,2,0.15); transform:translateY(-2px); }
+.ach-card.locked { opacity:0.4; filter:grayscale(1); }
+.ach-icon  { font-size:32px; margin-bottom:8px; }
+.ach-name  { font-size:12px; font-weight:800; color:#1a1a2e; margin-bottom:3px; }
+.ach-desc  { font-size:11px; color:#aaa; line-height:1.4; margin-bottom:6px; }
+.ach-date  { font-size:11px; font-weight:700; color:#fc4c02; }
+.ach-value { font-size:11px; color:#888; margin-top:2px; }
+.ach-locked-label { font-size:11px; color:#ccc; font-weight:600; }
+.ach-badge { position:absolute; top:-6px; right:-6px; background:#06d6a0; color:#fff; font-size:9px; font-weight:700; padding:2px 6px; border-radius:8px; }
+
+.footer { text-align:center; padding:32px; font-size:12px; color:#ddd; }
 </style>
 </head>
 <body>
 
 <!-- HEADER -->
 <div class="header">
-  <div class="avatar" id="avatarEl">?</div>
-  <div>
-    <div class="header-name" id="headerName">{{ athlete.get('firstname','') }} {{ athlete.get('lastname','') }}</div>
-    <div class="header-sub" id="headerSub">
-      {{ athlete.get('city','') }}{% if athlete.get('country') %}, {{ athlete.get('country') }}{% endif %}
+  <div class="header-logo">🐦 Pacebird</div>
+  <div class="header-spacer"></div>
+  <div class="header-actions">
+    <button class="btn-sm" onclick="refreshData()">↻ Refresh</button>
+    <div class="profile-btn" id="profileBtn" onclick="toggleProfileCard()">
+      <div class="profile-avatar" id="profileAvatar"><span id="profileInitial">?</span></div>
+      <div class="profile-card" id="profileCard">
+        <div class="pc-name" id="pcName">—</div>
+        <div class="pc-loc"  id="pcLoc">—</div>
+        <div class="pc-row"><span>Total runs</span><span id="pcRuns">—</span></div>
+        <div class="pc-row"><span>Total distance</span><span id="pcKm">—</span></div>
+        <div class="pc-actions">
+          <button class="pc-btn pc-btn-refresh" onclick="event.stopPropagation();refreshData();toggleProfileCard()">↻ Sync</button>
+          <a href="/logout" class="pc-btn pc-btn-logout">Sign out</a>
+        </div>
+      </div>
     </div>
   </div>
-  <button id="refreshBtn" onclick="refreshData()" style="margin-left:auto;margin-right:10px;font-size:12px;color:#aaa;padding:7px 14px;border:1px solid #eee;border-radius:8px;background:none;cursor:pointer;" title="Force re-fetch from Strava">↻ Refresh</button>
-  <a href="/logout" class="logout">Sign out</a>
 </div>
 
-<!-- TABS BAR -->
+<!-- TABS -->
 <div class="tabs-bar">
   <button class="tab-btn active" onclick="switchTab('overview')">📊 Overview</button>
   <button class="tab-btn" onclick="switchTab('running')">🏃 Running</button>
-  <button class="tab-btn" onclick="switchTab('training')">💪 Training Load</button>
+  <button class="tab-btn" onclick="switchTab('cycling')">🚴 Cycling</button>
+  <button class="tab-btn" onclick="switchTab('swimming')">🏊 Swimming</button>
+  <button class="tab-btn" onclick="switchTab('training')">💪 Training</button>
   <button class="tab-btn" onclick="switchTab('insights')">🧬 Insights</button>
-  <button class="tab-btn" onclick="switchTab('activities')">📋 All Activities</button>
-  <button class="tab-btn" onclick="switchTab('share')">📲 Share Card</button>
+  <button class="tab-btn" onclick="switchTab('stats')">📈 Stats</button>
+  <button class="tab-btn" onclick="switchTab('achievements')">🏆 Achievements</button>
+  <button class="tab-btn" onclick="switchTab('activities')">📋 Activities</button>
 </div>
 
 {% if demo %}
-<div style="background:#1a1a2e;color:#fc4c02;text-align:center;padding:8px;font-size:12px;font-weight:700;letter-spacing:0.5px;">
-  👀 DEMO MODE — Synthetic data based on a real athlete profile · <a href="/" style="color:#ff8c42;text-decoration:none;">Connect your Strava →</a>
+<div style="background:#1a1a2e;color:#fc4c02;text-align:center;padding:8px;font-size:12px;font-weight:700;">
+  👀 DEMO MODE — Synthetic data · <a href="/" style="color:#ff8c42;text-decoration:none;">Connect your Strava →</a>
 </div>
 {% endif %}
 
-<!-- RATE LIMIT BANNER -->
-<div id="rateLimitBanner" style="display:none;background:#fff7ed;border-bottom:1px solid #ffd0a8;padding:10px 40px;font-size:13px;color:#b45309;">
-  ⚠️ <strong>Strava rate limit reached.</strong> Showing your cached data. Resets every 15 minutes.
+<div id="dataRangeBanner" style="display:none;background:#f0fefa;border-bottom:1px solid #b2eed9;padding:8px 32px;font-size:12px;color:#065f46;align-items:center;gap:8px;">
+  <span>📅</span><span id="dataRangeText"></span>
+</div>
+<div id="rateLimitBanner" style="display:none;background:#fff7ed;border-bottom:1px solid #ffd0a8;padding:10px 32px;font-size:13px;color:#b45309;">
+  ⚠️ <strong>Strava rate limit reached.</strong> Showing cached data. Resets in 15 min.
 </div>
 
-<!-- LOADING -->
 <div class="loading" id="loading">
   <div class="spinner"></div>
   <p style="font-size:14px;color:#aaa">Fetching your Strava data…</p>
 </div>
 
-<!-- CONTENT -->
 <div id="content" style="display:none">
 
-  <!-- ══ TAB: OVERVIEW ══ -->
-  <div class="tab-panel active" id="tab-overview">
-    <div class="container">
-      <div class="section-title">At a Glance</div>
-      <div class="cards-grid">
-        <div class="card c-orange">
-          <div class="card-label">Total Runs</div>
-          <div class="card-value" id="totalRuns">—</div>
-          <div class="card-sub">last 24 months</div>
-        </div>
-        <div class="card c-orange">
-          <div class="card-label">Run Distance</div>
-          <div class="card-value" id="totalKm">—</div>
-          <div class="card-sub">kilometres</div>
-        </div>
-        <div class="card c-blue">
-          <div class="card-label">Gym Sessions</div>
-          <div class="card-value" id="totalGym">—</div>
-          <div class="card-sub">weight training</div>
-        </div>
-        <div class="card c-green">
-          <div class="card-label">Pace Improved</div>
-          <div class="card-value" id="paceImprove" style="color:#06d6a0">—</div>
-          <div class="card-sub">min/km gained</div>
-        </div>
-        <div class="card c-purple">
-          <div class="card-label">Longest Run</div>
-          <div class="card-value" id="longestRun">—</div>
-          <div class="card-sub">kilometres</div>
-        </div>
-        <div class="card c-yellow">
-          <div class="card-label">Squash</div>
-          <div class="card-value" id="totalSquash">—</div>
-          <div class="card-sub">sessions</div>
-        </div>
-      </div>
+<!-- ══ OVERVIEW ══ -->
+<div class="tab-panel active" id="tab-overview">
+  <div class="container">
+    <div class="section-title">At a Glance</div>
+    <div class="cards-grid">
+      <div class="card c-orange"><div class="card-label">Total Runs</div><div class="card-value" id="totalRuns">—</div><div class="card-sub" id="totalRunsSub">last 24 months</div></div>
+      <div class="card c-orange"><div class="card-label">Run Distance</div><div class="card-value" id="totalKm">—</div><div class="card-sub">kilometres</div></div>
+      <div class="card c-purple"><div class="card-label">Cycling</div><div class="card-value" id="totalRides">—</div><div class="card-sub" id="totalRideKm">rides</div></div>
+      <div class="card c-blue"><div class="card-label">Gym Sessions</div><div class="card-value" id="totalGym">—</div><div class="card-sub">weight training</div></div>
+      <div class="card c-green"><div class="card-label">Pace Improved</div><div class="card-value" id="paceImprove" style="color:#06d6a0">—</div><div class="card-sub">min/km gained</div></div>
+      <div class="card c-yellow"><div class="card-label">Longest Run</div><div class="card-value" id="longestRun">—</div><div class="card-sub">kilometres</div></div>
+    </div>
 
-      <div class="section-title">Activity Mix</div>
-      <div class="chart-grid">
-        <div class="chart-card">
-          <div class="chart-title">Sessions by Sport</div>
-          <div class="chart-sub">All activities across last 24 months</div>
-          <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
-        </div>
-        <div class="chart-card">
-          <div class="chart-title">Calories Burned per Hour by Sport</div>
-          <div class="chart-sub">Based on your actual logged data</div>
-          <div class="chart-wrap"><canvas id="calChart"></canvas></div>
-        </div>
+    <div class="section-title">This Week vs Last Week</div>
+    <div class="week-compare" id="weekCompare">
+      <div class="wc-header">
+        <div class="wc-header-label"></div>
+        <div class="wc-header-label">Last week</div>
+        <div class="wc-header-label this">This week</div>
+        <div class="wc-header-label"></div>
       </div>
+      <div class="wc-row">
+        <div class="wc-row-label">Sessions</div>
+        <div class="wc-cell dim" id="lwSessions">—</div>
+        <div class="wc-cell" id="twSessions">—</div>
+        <div><span class="wc-delta" id="deltaSessions"></span></div>
+      </div>
+      <div class="wc-row">
+        <div class="wc-row-label">Distance</div>
+        <div class="wc-cell dim" id="lwKm">—</div>
+        <div class="wc-cell" id="twKm">—</div>
+        <div><span class="wc-delta" id="deltaKm"></span></div>
+      </div>
+      <div class="wc-row">
+        <div class="wc-row-label">Moving time</div>
+        <div class="wc-cell dim" id="lwTime">—</div>
+        <div class="wc-cell" id="twTime">—</div>
+        <div></div>
+      </div>
+    </div>
 
-      <div class="section-title">Consistency – Last 52 Weeks</div>
+    <div class="section-title">Your Best Times (PRs)</div>
+    <div class="pr-grid" id="overviewPrGrid"></div>
+
+    <div class="section-title">Recent Activities</div>
+    <div class="recent-list" id="recentList"></div>
+
+    <div class="section-title">Activity Mix</div>
+    <div class="chart-grid">
       <div class="chart-card">
-        <div class="chart-title">Run Days Heatmap</div>
-        <div class="chart-sub">Each cell = one week · darker = more km run</div>
-        <div style="margin-top:14px">
-          <div class="heatmap-grid" id="heatmapGrid"></div>
-          <div class="hm-legend">
-            <span>Less</span>
-            <div class="hm-leg-cell" style="background:#f0f0f0"></div>
-            <div class="hm-leg-cell" style="background:#ffd0b8"></div>
-            <div class="hm-leg-cell" style="background:#ff8c42"></div>
-            <div class="hm-leg-cell" style="background:#fc4c02"></div>
-            <div class="hm-leg-cell" style="background:#a62b00"></div>
-            <span>More (20km+)</span>
+        <div class="chart-title">Sessions by Sport</div>
+        <div class="chart-sub">Click a segment to filter the Activities table</div>
+        <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Calories Burned per Hour</div>
+        <div class="chart-sub">Click a bar to filter the Activities table</div>
+        <div class="chart-wrap"><canvas id="calChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section-title">Consistency – Last 52 Weeks</div>
+    <div class="chart-card">
+      <div class="chart-title">Run Days Heatmap</div>
+      <div class="chart-sub">Each cell = one week · hover for km · darker = more</div>
+      <div style="margin-top:14px">
+        <div class="heatmap-wrap"><div class="heatmap-grid" id="heatmapGrid"></div></div>
+        <div class="hm-legend">
+          <span>Less</span>
+          <div class="hm-leg-cell" style="background:#f0f0f0"></div>
+          <div class="hm-leg-cell" style="background:#ffd0b8"></div>
+          <div class="hm-leg-cell" style="background:#ff8c42"></div>
+          <div class="hm-leg-cell" style="background:#fc4c02"></div>
+          <div class="hm-leg-cell" style="background:#a62b00"></div>
+          <span>More (20km+)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ RUNNING ══ -->
+<div class="tab-panel" id="tab-running">
+  <div class="container">
+    <div class="section-title">Personal Records 🏆</div>
+    <div class="pr-grid" id="prGrid"></div>
+
+    <div class="section-title">Race Time Predictor 🔮</div>
+    <p style="font-size:13px;color:#888;margin-bottom:16px;line-height:1.6">
+      Based on your fastest 5K and the <strong>Riegel formula</strong> (t₂ = t₁ × (d₂/d₁)<sup>1.06</sup>). These are realistic targets — longer races need more specific training.
+    </p>
+    <div class="predictor-grid" id="predictorGrid"></div>
+
+    <div class="section-title">Yearly Distance 📅</div>
+    <div class="chart-card wide">
+      <div class="chart-title">Distance per Year — Monthly</div>
+      <div class="chart-sub">One line per calendar year. Current year ends at the current month.</div>
+      <div id="yearLegend" class="year-colors" style="margin-top:8px;margin-bottom:0"></div>
+      <div class="chart-wrap xtall"><canvas id="yearlyChart"></canvas></div>
+    </div>
+    <div class="chart-card wide" style="margin-top:18px">
+      <div class="chart-title">Cumulative Distance per Year</div>
+      <div class="chart-sub">Running total of km — see which year you trained most.</div>
+      <div class="chart-wrap xtall"><canvas id="yearCumChart"></canvas></div>
+    </div>
+
+    <div class="section-title">Monthly Distance</div>
+    <div class="chart-card">
+      <div class="chart-title">Kilometres Run Each Month</div>
+      <div class="chart-sub">Full history — scroll if needed</div>
+      <div class="chart-wrap tall"><canvas id="monthlyChart"></canvas></div>
+    </div>
+
+    <div class="section-title">Pace & Distance</div>
+    <div class="chart-grid">
+      <div class="chart-card">
+        <div class="chart-title">Pace Over Time</div>
+        <div class="chart-sub">min/km per run — lower = faster</div>
+        <div class="chart-wrap"><canvas id="paceChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Run Distance Distribution</div>
+        <div class="chart-sub">How often you run each distance range</div>
+        <div class="chart-wrap"><canvas id="distChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ CYCLING ══ -->
+<div class="tab-panel" id="tab-cycling">
+  <div class="container">
+    <div class="section-title">Cycling Summary</div>
+    <div class="cards-grid" id="cyclingCards">
+      <div class="card c-purple"><div class="card-label">Total Rides</div><div class="card-value" id="cyRides">—</div><div class="card-sub">all time</div></div>
+      <div class="card c-purple"><div class="card-label">Total Distance</div><div class="card-value" id="cyKm">—</div><div class="card-sub">kilometres</div></div>
+      <div class="card c-blue"><div class="card-label">Longest Ride</div><div class="card-value" id="cyLongest">—</div><div class="card-sub">km</div></div>
+    </div>
+
+    <div class="section-title">Distance Records 🏆</div>
+    <div class="pr-grid" id="ridePrGrid"></div>
+
+    <div class="section-title">Yearly Cycling Distance 📅</div>
+    <div class="chart-card wide">
+      <div class="chart-title">Cycling Distance per Year — Monthly</div>
+      <div class="chart-sub">One line per calendar year</div>
+      <div id="rideYearLegend" class="year-colors" style="margin-top:8px;margin-bottom:0"></div>
+      <div class="chart-wrap xtall"><canvas id="rideYearlyChart"></canvas></div>
+    </div>
+
+    <div class="section-title">Monthly Distance</div>
+    <div class="chart-card wide">
+      <div class="chart-title">Kilometres Cycled Each Month</div>
+      <div class="chart-sub">Full history</div>
+      <div class="chart-wrap tall"><canvas id="rideMonthlyChart"></canvas></div>
+    </div>
+
+    <div class="section-title" style="margin-top:24px">Speed Trend</div>
+    <div class="chart-card wide">
+      <div class="chart-title">Average Speed Over Time (km/h)</div>
+      <div class="chart-sub">Higher = faster — shows your cycling progression</div>
+      <div class="chart-wrap tall"><canvas id="rideSpeedChart"></canvas></div>
+    </div>
+
+    <div id="noCyclingMsg" style="display:none;text-align:center;padding:60px;color:#bbb">
+      <div style="font-size:48px;margin-bottom:16px">🚴</div>
+      <p style="font-size:15px;font-weight:700;margin-bottom:8px">No cycling activities found</p>
+      <p style="font-size:13px">Log a Ride on Strava to see cycling stats here.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SWIMMING ══ -->
+<div class="tab-panel" id="tab-swimming">
+  <div class="container">
+    <div class="section-title">Swimming Summary</div>
+    <div class="cards-grid" id="swimCards">
+      <div class="card c-teal"><div class="card-label">Total Swims</div><div class="card-value" id="swTotalSwims">—</div><div class="card-sub">all time</div></div>
+      <div class="card c-teal"><div class="card-label">Total Distance</div><div class="card-value" id="swTotalKm">—</div><div class="card-sub">kilometres</div></div>
+      <div class="card c-blue"><div class="card-label">Longest Swim</div><div class="card-value" id="swLongest">—</div><div class="card-sub">metres</div></div>
+      <div class="card c-green"><div class="card-label">Avg per Session</div><div class="card-value" id="swAvg">—</div><div class="card-sub">metres</div></div>
+    </div>
+
+    <div class="section-title">Monthly Distance</div>
+    <div class="chart-card wide">
+      <div class="chart-title">Metres Swum Each Month</div>
+      <div class="chart-sub">Full history</div>
+      <div class="chart-wrap tall scroll"><canvas id="swimMonthlyChart"></canvas></div>
+    </div>
+
+    <div id="noSwimmingMsg" style="display:none;text-align:center;padding:60px;color:#bbb">
+      <div style="font-size:48px;margin-bottom:16px">🏊</div>
+      <p style="font-size:15px;font-weight:700;margin-bottom:8px">No swimming activities found</p>
+      <p style="font-size:13px">Log a Swim on Strava to see swimming stats here.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TRAINING ══ -->
+<div class="tab-panel" id="tab-training">
+  <div class="container">
+    <div class="section-title">Weekly Load</div>
+    <div class="chart-card">
+      <div class="chart-title">Combined Training Load — Last 12 Weeks</div>
+      <div class="chart-sub">All sports combined — effort units (suffer score or estimated)</div>
+      <div class="chart-wrap tall"><canvas id="weeklyChart"></canvas></div>
+    </div>
+
+    <div class="section-title">Training Sweet Spot 🎯</div>
+    <div class="chart-card">
+      <div class="chart-title">Prior-Week Load vs Your Running Pace <span class="sweet-badge" id="sweetBadge" style="display:none">Sweet spot</span></div>
+      <div class="chart-sub">How hard you trained the week before vs how fast you ran. The sweet spot is where you run fastest.</div>
+      <div class="chart-wrap tall"><canvas id="sweetChart"></canvas></div>
+    </div>
+
+    <div class="section-title">Best Time of Day</div>
+    <div class="chart-grid">
+      <div id="todBestCard" style="display:none">
+        <div class="tod-best">
+          <div class="tod-icon">⏰</div>
+          <div>
+            <div class="tod-label">YOU RUN FASTEST IN THE</div>
+            <div class="tod-value" id="todBestLabel">—</div>
+            <div class="tod-sub" id="todBestSub">—</div>
           </div>
         </div>
       </div>
-    </div>
-  </div>
-
-  <!-- ══ TAB: RUNNING ══ -->
-  <div class="tab-panel" id="tab-running">
-    <div class="container">
-      <div class="section-title">Personal Records 🏆</div>
-      <div class="pr-grid" id="prGrid"></div>
-
-      <div class="section-title">Race Time Predictor 🔮</div>
-      <p style="font-size:13px;color:#aaa;margin-bottom:16px">Estimated finish times based on your current 5K PR using the Riegel formula.</p>
-      <div class="predictor-grid" id="predictorGrid"></div>
-
-      <div class="section-title">Monthly Distance</div>
-      <div class="chart-card">
-        <div class="chart-title">Kilometres Run Each Month</div>
-        <div class="chart-sub">Darker orange = bigger month</div>
-        <div class="chart-wrap tall"><canvas id="monthlyChart"></canvas></div>
-      </div>
-
-      <div class="section-title">Pace & Distance</div>
-      <div class="chart-grid">
-        <div class="chart-card">
-          <div class="chart-title">Pace Over Time</div>
-          <div class="chart-sub">min/km per run — lower line = faster</div>
-          <div class="chart-wrap"><canvas id="paceChart"></canvas></div>
-        </div>
-        <div class="chart-card">
-          <div class="chart-title">Run Distance Distribution</div>
-          <div class="chart-sub">How often you run each distance range</div>
-          <div class="chart-wrap"><canvas id="distChart"></canvas></div>
-        </div>
+      <div class="chart-card" style="grid-column:1/-1">
+        <div class="chart-title">Average Pace by Time of Day</div>
+        <div class="chart-sub">Lower = faster average pace in that slot</div>
+        <div class="chart-wrap"><canvas id="todChart"></canvas></div>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- ══ TAB: TRAINING LOAD ══ -->
-  <div class="tab-panel" id="tab-training">
-    <div class="container">
-      <div class="section-title">Weekly Load</div>
-      <div class="chart-card">
-        <div class="chart-title">Combined Training Load — Last 12 Weeks</div>
-        <div class="chart-sub">All sports combined: runs + gym + squash + rides</div>
-        <div class="chart-wrap tall"><canvas id="weeklyChart"></canvas></div>
-      </div>
+<!-- ══ INSIGHTS ══ -->
+<div class="tab-panel" id="tab-insights">
+  <div class="container">
+    <div class="section-title">Performance Insights ⚡</div>
+    <div class="insight-grid" id="perfInsightGrid"></div>
 
-      <div class="section-title">Training Sweet Spot 🎯</div>
-      <div class="chart-card">
-        <div class="chart-title">
-          Prior-Week Load vs Your Running Pace
-          <span class="sweet-badge" id="sweetBadge" style="display:none">Sweet spot</span>
-        </div>
-        <div class="chart-sub">Shows how hard you trained last week and how fast you ran this week. The highlighted bar is your personal sweet spot.</div>
-        <div class="chart-wrap tall"><canvas id="sweetChart"></canvas></div>
-      </div>
-
-      <div class="section-title">Best Time of Day to Run</div>
-      <div class="chart-grid">
-        <div id="todBestCard" style="display:none">
-          <div class="tod-best">
-            <div class="tod-icon">⏰</div>
-            <div>
-              <div class="tod-label">YOU RUN FASTEST IN THE</div>
-              <div class="tod-value" id="todBestLabel">—</div>
-              <div class="tod-sub" id="todBestSub">—</div>
-            </div>
-          </div>
-        </div>
-        <div class="chart-card" style="grid-column:1/-1">
-          <div class="chart-title">Average Pace by Time of Day</div>
-          <div class="chart-sub">Lower bar = faster average pace in that slot</div>
-          <div class="chart-wrap"><canvas id="todChart"></canvas></div>
-        </div>
-      </div>
+    <div class="section-title">Weather & Performance 🌤️</div>
+    <div class="enrich-bar-wrap" id="enrichProgress" style="display:none">
+      <div class="enrich-bar-track"><div class="enrich-bar-fill" id="enrichFill" style="width:0%"></div></div>
+      <span class="enrich-status" id="enrichStatus">Fetching weather data…</span>
+    </div>
+    <div id="weatherInsightsArea">
+      <p style="font-size:13px;color:#bbb;padding:20px 0">Weather data loads in background. Updates automatically — no refresh needed.</p>
     </div>
   </div>
+</div>
 
-  <!-- ══ TAB: INSIGHTS ══ -->
-  <div class="tab-panel" id="tab-insights">
-    <div class="container">
-      <div class="section-title">Fitness Age Score 🧬</div>
-      <div class="fa-card">
-        <div class="fa-score">
-          <div class="fa-number" id="faNumber">—</div>
-          <div class="fa-unit">Fitness Age</div>
-        </div>
-        <div class="fa-details">
-          <h3 id="faHeadline">Loading…</h3>
-          <div class="fa-row"><span>Your Actual Age</span><span id="faActual">—</span></div>
-          <div class="fa-row"><span>Estimated VO₂max</span><span id="faVo2">—</span></div>
-          <div class="fa-row"><span>Compared to your age</span><span id="faDiff">—</span></div>
-          <!-- Birth year form — shown only when no age data -->
-          <div class="fa-form" id="faBirthForm" style="display:none">
-            <label>Enter your birth year to calculate fitness age</label>
-            <div class="fa-form-row">
-              <input type="number" id="birthYearInput" placeholder="e.g. 1997" min="1940" max="2006" />
-              <button onclick="submitBirthYear()">Calculate</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="section-title" style="margin-top:32px">Weather & Performance 🌤️</div>
-
-      <!-- enrichment progress bar — hidden once complete -->
-      <div class="enrich-bar-wrap" id="enrichProgress" style="display:none">
-        <div class="enrich-bar-track"><div class="enrich-bar-fill" id="enrichFill" style="width:0%"></div></div>
-        <span class="enrich-status" id="enrichStatus">Fetching weather data…</span>
-      </div>
-
-      <div id="weatherInsightsArea">
-        <p style="font-size:13px;color:#bbb;padding:20px 0">
-          Weather data loads in the background after your first login. Check back in a minute — no refresh needed, this updates automatically.
-        </p>
-      </div>
-    </div>
+<!-- ══ STATS ══ -->
+<div class="tab-panel" id="tab-stats">
+  <div class="container">
+    <div class="section-title">Your Numbers 📊</div>
+    <div id="statsContent"><div style="color:#bbb;padding:20px">Loading…</div></div>
   </div>
+</div>
 
-  <!-- ══ TAB: ALL ACTIVITIES ══ -->
-  <div class="tab-panel" id="tab-activities">
-    <div class="container">
-      <div class="section-title">All Activities</div>
-      <div class="tbl-toolbar">
-        <input  class="tbl-search" id="tblSearch"      type="text"    placeholder="Search by name…" oninput="tblFilter()">
-        <select class="tbl-select" id="tblSport"        onchange="tblFilter()">
-          <option value="">All sports</option>
-          <option value="Run">Running</option>
-          <option value="WeightTraining">Gym</option>
-          <option value="Squash">Squash</option>
-          <option value="Ride">Cycling</option>
-        </select>
-        <select class="tbl-select" id="tblPeriod" onchange="tblFilter()">
-          <option value="">All time</option>
-          <option value="7">Last 7 days</option>
-          <option value="30">Last 30 days</option>
-          <option value="90">Last 3 months</option>
-          <option value="180">Last 6 months</option>
-          <option value="365">Last 12 months</option>
-        </select>
-        <span class="tbl-count" id="tblCount"></span>
-      </div>
-      <div class="tbl-wrap">
-        <table id="activitiesTable">
-          <thead>
-            <tr>
-              <th onclick="tblSort('date')"      id="th-date">Date</th>
-              <th onclick="tblSort('name')"      id="th-name">Name</th>
-              <th onclick="tblSort('sport')"     id="th-sport">Sport</th>
-              <th onclick="tblSort('location')"  id="th-location">Location</th>
-              <th onclick="tblSort('dist_km')"   id="th-dist_km">Distance</th>
-              <th onclick="tblSort('time')"      id="th-time">Time</th>
-              <th onclick="tblSort('pace')"      id="th-pace">Pace</th>
-              <th onclick="tblSort('elevation')" id="th-elevation">Elev.</th>
-              <th onclick="tblSort('hr')"        id="th-hr">Avg HR</th>
-              <th onclick="tblSort('temp_c')"    id="th-temp_c">Temp</th>
-              <th onclick="tblSort('weather')"   id="th-weather">Weather</th>
-              <th onclick="tblSort('calories')"  id="th-calories">Kcal</th>
-              <th onclick="tblSort('suffer')"    id="th-suffer">Suffer</th>
-            </tr>
-          </thead>
-          <tbody id="tblBody">
-            <tr><td colspan="13" class="tbl-empty">Loading activities…</td></tr>
-          </tbody>
-        </table>
-        <div class="tbl-pagination">
-          <span class="tbl-page-info" id="tblPageInfo"></span>
-          <div class="tbl-page-btns">
-            <button class="tbl-page-btn" id="tblPrev" onclick="tblPageNav(-1)">← Prev</button>
-            <button class="tbl-page-btn" id="tblNext" onclick="tblPageNav(+1)">Next →</button>
-          </div>
+<!-- ══ ACHIEVEMENTS ══ -->
+<div class="tab-panel" id="tab-achievements">
+  <div class="container">
+    <div class="section-title">Achievements 🏆</div>
+    <div class="ach-filter" id="achFilter">
+      <button class="ach-filter-btn active" onclick="achSetFilter('all',this)">All</button>
+      <button class="ach-filter-btn" onclick="achSetFilter('running',this)">🏃 Running</button>
+      <button class="ach-filter-btn" onclick="achSetFilter('cycling',this)">🚴 Cycling</button>
+      <button class="ach-filter-btn" onclick="achSetFilter('swimming',this)">🏊 Swimming</button>
+      <button class="ach-filter-btn" onclick="achSetFilter('total_distance',this)">📍 Total km</button>
+      <button class="ach-filter-btn" onclick="achSetFilter('pace',this)">⚡ Pace</button>
+      <button class="ach-filter-btn" onclick="achSetFilter('duration',this)">⏱️ Duration</button>
+      <button class="ach-filter-btn" onclick="achSetFilter('streak',this)">🔥 Streaks</button>
+    </div>
+    <div id="achContent"><div style="color:#bbb;padding:20px">Loading…</div></div>
+  </div>
+</div>
+
+<!-- ══ ACTIVITIES ══ -->
+<div class="tab-panel" id="tab-activities">
+  <div class="container">
+    <div class="section-title">All Activities <span style="font-size:11px;color:#bbb;font-weight:400;text-transform:none;letter-spacing:0">— click any row to see details</span></div>
+    <div class="tbl-toolbar">
+      <input class="tbl-search" id="tblSearch" type="text" placeholder="Search by name…" oninput="tblFilter()">
+      <select class="tbl-select" id="tblSport" onchange="tblFilter()"><option value="">All sports</option></select>
+      <select class="tbl-select" id="tblPeriod" onchange="tblFilter()">
+        <option value="">All time</option>
+        <option value="7">Last 7 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 3 months</option>
+        <option value="180">Last 6 months</option>
+        <option value="365">Last year</option>
+      </select>
+      <div class="tbl-range-group">Dist: <input class="tbl-range-input" id="tblMinDist" type="number" placeholder="0" min="0" oninput="tblFilter()">–<input class="tbl-range-input" id="tblMaxDist" type="number" placeholder="∞" min="0" oninput="tblFilter()"> km</div>
+      <span class="tbl-count" id="tblCount"></span>
+    </div>
+    <div class="tbl-wrap">
+      <table id="activitiesTable">
+        <thead><tr>
+          <th onclick="tblSort('date')"      id="th-date">Date</th>
+          <th onclick="tblSort('name')"      id="th-name">Name</th>
+          <th onclick="tblSort('sport')"     id="th-sport">Sport</th>
+          <th onclick="tblSort('location')"  id="th-location">Location</th>
+          <th onclick="tblSort('dist_km')"   id="th-dist_km">Distance</th>
+          <th onclick="tblSort('time')"      id="th-time">Time</th>
+          <th onclick="tblSort('pace')"      id="th-pace">Pace</th>
+          <th onclick="tblSort('elevation')" id="th-elevation">Elev.</th>
+          <th onclick="tblSort('hr')"        id="th-hr">HR</th>
+          <th onclick="tblSort('temp_c')"    id="th-temp_c">Temp</th>
+          <th onclick="tblSort('calories')"  id="th-calories">Kcal</th>
+          <th onclick="tblSort('suffer')"    id="th-suffer">Suffer</th>
+        </tr></thead>
+        <tbody id="tblBody"><tr><td colspan="12" class="tbl-empty">Loading…</td></tr></tbody>
+      </table>
+      <div class="tbl-pagination">
+        <span class="tbl-page-info" id="tblPageInfo"></span>
+        <div class="tbl-page-btns">
+          <button class="tbl-page-btn" id="tblPrev" onclick="tblPageNav(-1)">← Prev</button>
+          <button class="tbl-page-btn" id="tblNext" onclick="tblPageNav(+1)">Next →</button>
         </div>
       </div>
     </div>
   </div>
-
-  <!-- ══ TAB: SHARE ══ -->
-  <div class="tab-panel" id="tab-share">
-    <div class="container">
-      <div class="section-title">Your Stats Card</div>
-      <div class="share-card">
-        <div class="share-icon">🃏</div>
-        <div class="share-text">
-          <h3>Download Your Shareable Card</h3>
-          <p>A beautiful 1080×1080 PNG with your name, PRs, total distance, fitness age, and pace improvement. Save it and post it on Instagram, WhatsApp, or anywhere else.</p>
-          <button class="share-btn" id="downloadBtn" onclick="downloadCard()">
-            ⬇ Download My Card
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
+</div>
 
 </div><!-- /content -->
 
-<div class="footer">StravaStats · Read-only access · We never post to your Strava</div>
+<!-- SHARE FAB -->
+<button class="share-fab" id="shareFab" style="display:none" onclick="openShareModal()">📲 Share Card</button>
+
+<!-- SHARE MODAL -->
+<div class="modal-overlay" id="shareModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeShareModal()">×</button>
+    <h3>🃏 Your Stats Card</h3>
+    <p style="font-size:13px;color:#888;line-height:1.6;margin:8px 0 24px">A 1080×1080 PNG with your PRs, distance, fitness age and pace improvement — ready for Instagram or WhatsApp.</p>
+    <button class="share-btn" id="downloadBtn" onclick="downloadCard()">⬇ Download My Card</button>
+  </div>
+</div>
+
+<!-- ACTIVITY DETAIL MODAL -->
+<div class="act-modal-overlay" id="actModal">
+  <div class="act-modal" id="actModalInner">
+    <button class="act-close" onclick="closeActModal()">×</button>
+    <div class="act-map" id="actMapPanel">
+      <div class="act-map-inner" id="actMapEl"></div>
+    </div>
+    <div class="act-detail" id="actDetailPanel">
+      <div class="act-loading" id="actLoading">Loading…</div>
+      <div id="actDetailContent" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">🐦 Pacebird · Read-only · We never post to your Strava</div>
 
 <script>
 Chart.defaults.font.family = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
@@ -596,612 +758,691 @@ Chart.defaults.color = '#999';
 const C = {
   orange:'#fc4c02', orange2:'#ff8c42', orange3:'#ffd0b8',
   blue:'#3a86ff', green:'#06d6a0', purple:'#9b5de5', yellow:'#ffd166',
+  teal:'#00b4d8', pink:'#e63946',
 };
+const YEAR_COLORS = ['#fc4c02','#3a86ff','#06d6a0','#9b5de5','#ffd166','#e63946','#00b4d8'];
+const SPORT_LABELS = { Run:'Running', WeightTraining:'Gym', Squash:'Squash', Ride:'Cycling', Swim:'Swimming', Walk:'Walk', Hike:'Hike' };
+const SPORT_COLORS = { Run:'#fc4c02', WeightTraining:'#3a86ff', Squash:'#06d6a0', Ride:'#9b5de5', Swim:'#00b4d8', Walk:'#ffd166', Other:'#ccc' };
 
-// ── FITNESS AGE ───────────────────────────────────────────────────
-function renderFitnessAge(fa) {
-  if (!fa) {
-    document.getElementById('faHeadline').textContent = 'Enter your birth year below';
-    document.getElementById('faBirthForm').style.display = 'block';
-    document.getElementById('faNumber').textContent = '?';
-    document.getElementById('faActual').textContent = '—';
-    document.getElementById('faVo2').textContent = '—';
-    document.getElementById('faDiff').textContent = '—';
-    return;
-  }
-  document.getElementById('faBirthForm').style.display = 'none';
-  document.getElementById('faNumber').textContent  = fa.fitness_age;
-  document.getElementById('faActual').textContent  = fa.actual_age + ' yrs';
-  document.getElementById('faVo2').textContent     = fa.vo2max + ' ml/kg/min';
-  const diff = fa.difference;
-  const diffEl = document.getElementById('faDiff');
-  if (diff > 0) {
-    diffEl.textContent  = diff + ' years younger ✓';
-    diffEl.className    = 'fa-younger';
-    document.getElementById('faHeadline').textContent =
-      `You're ${diff} year${diff !== 1 ? 's' : ''} fitter than your actual age 💪`;
-  } else if (diff < 0) {
-    diffEl.textContent  = Math.abs(diff) + ' years older';
-    diffEl.className    = 'fa-older';
-    document.getElementById('faHeadline').textContent = 'Keep building — room to improve';
-  } else {
-    diffEl.textContent  = 'Right at your age';
-    document.getElementById('faHeadline').textContent = 'Right on track with your age group';
+// ── PROFILE CARD ──────────────────────────────────────────────────
+function toggleProfileCard() { document.getElementById('profileCard').classList.toggle('open'); }
+document.addEventListener('click', e => {
+  if (!document.getElementById('profileBtn').contains(e.target))
+    document.getElementById('profileCard').classList.remove('open');
+});
+function fillProfileCard(d) {
+  const athlete = {{ athlete | tojson }};
+  const name = ((athlete.firstname||'') + ' ' + (athlete.lastname||'')).trim() || 'Athlete';
+  document.getElementById('profileInitial').textContent = name[0] || '?';
+  document.getElementById('pcName').textContent = name;
+  document.getElementById('pcLoc').textContent = [athlete.city, athlete.country].filter(Boolean).join(', ') || '—';
+  document.getElementById('pcRuns').textContent = d.total_runs ?? '—';
+  document.getElementById('pcKm').textContent = (d.total_run_km ?? '—') + ' km';
+  if (d.profile_pic) {
+    const img = document.createElement('img'); img.src = d.profile_pic; img.alt = name;
+    const av = document.getElementById('profileAvatar'); av.innerHTML = ''; av.appendChild(img);
   }
 }
 
-function submitBirthYear() {
-  const yr = document.getElementById('birthYearInput').value;
-  if (!yr || yr < 1940 || yr > 2006) {
-    alert('Enter a valid birth year (e.g. 1997)');
-    return;
-  }
-  const btn = document.querySelector('.fa-form button');
-  btn.textContent = 'Calculating…';
-  btn.disabled = true;
-  fetch(`/api/stats?birth_year=${yr}`)
-    .then(r => r.json())
-    .then(d => {
-      renderFitnessAge(d.fitness_age);
-      btn.textContent = 'Calculate';
-      btn.disabled = false;
-    });
-}
-
-// ── DOWNLOAD CARD ─────────────────────────────────────────────────
+// ── SHARE ─────────────────────────────────────────────────────────
+function openShareModal()  { document.getElementById('shareModal').classList.add('open'); }
+function closeShareModal() { document.getElementById('shareModal').classList.remove('open'); }
+document.getElementById('shareModal').addEventListener('click', e => { if (e.target===document.getElementById('shareModal')) closeShareModal(); });
 function downloadCard() {
   const btn = document.getElementById('downloadBtn');
-  btn.classList.add('share-loading');
-  btn.textContent = '⏳ Generating…';
-  window.location.href = '/api/card';
-  setTimeout(() => {
-    btn.classList.remove('share-loading');
-    btn.innerHTML = '⬇ Download My Card';
-  }, 3000);
+  btn.style.opacity='0.7'; btn.textContent='⏳ Generating…';
+  window.location.href='/api/card';
+  setTimeout(()=>{ btn.style.opacity='1'; btn.innerHTML='⬇ Download My Card'; }, 3000);
 }
 
-// ── BAR COLOR HELPER ──────────────────────────────────────────────
+// ── ACTIVITY DETAIL MODAL ─────────────────────────────────────────
+let actMap = null;
+let actDetailCache = {};
+
+function openActModal(actId, actName, sport) {
+  document.getElementById('actModal').classList.add('open');
+  document.getElementById('actLoading').style.display='block';
+  document.getElementById('actDetailContent').style.display='none';
+  // reset map
+  document.getElementById('actMapEl').innerHTML='';
+  if (actMap) { actMap.remove(); actMap=null; }
+
+  if (actDetailCache[actId]) {
+    renderActDetail(actDetailCache[actId]);
+    return;
+  }
+
+  fetch(`/api/activity/${actId}`)
+    .then(r=>r.json())
+    .then(d=>{
+      actDetailCache[actId]=d;
+      renderActDetail(d);
+    })
+    .catch(()=>{
+      document.getElementById('actLoading').textContent='Failed to load activity detail.';
+    });
+}
+
+function closeActModal() {
+  document.getElementById('actModal').classList.remove('open');
+  if (actMap) { actMap.remove(); actMap=null; }
+  document.getElementById('actMapEl').innerHTML='';
+}
+document.getElementById('actModal').addEventListener('click', e=>{
+  if (e.target===document.getElementById('actModal')) closeActModal();
+});
+
+function renderActDetail(d) {
+  document.getElementById('actLoading').style.display='none';
+  const el = document.getElementById('actDetailContent');
+  el.style.display='block';
+
+  const spd = d.average_speed;
+  const isRun = d.sport_type === 'Run';
+  const paceStr = spd>0 ? (() => { const s=1000/spd; return Math.floor(s/60)+':'+(Math.round(s%60)+'').padStart(2,'0'); })() : null;
+  const speedKmh = spd>0 ? (spd*3.6).toFixed(1) : null;
+
+  let splitsHtml = '';
+  if (d.splits_metric && d.splits_metric.length > 0) {
+    splitsHtml = `<div class="act-splits">
+      <h4>Splits</h4>
+      ${d.splits_metric.map((s,i)=>{
+        const p=s.average_speed>0?(1000/s.average_speed):null;
+        const pStr=p?Math.floor(p/60)+':'+(Math.round(p%60)+'').padStart(2,'0'):'-';
+        return `<div class="split-row"><span>km ${i+1}</span><span>${pStr}/km</span><span>${s.distance?Math.round(s.distance)+'m':''}</span></div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  el.innerHTML = `
+    <div class="act-name">${d.name||'Activity'}</div>
+    <div class="act-sport" style="margin-bottom:16px">${new Date(d.date||'').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) || ''}</div>
+    <div class="act-stats-grid">
+      ${d.dist_km>0 ? `<div class="act-stat"><div class="act-stat-label">Distance</div><div class="act-stat-value">${d.dist_km} km</div></div>` : ''}
+      ${d.time ? `<div class="act-stat"><div class="act-stat-label">Time</div><div class="act-stat-value">${d.time}</div></div>` : ''}
+      ${paceStr ? `<div class="act-stat"><div class="act-stat-label">Avg Pace</div><div class="act-stat-value">${paceStr}/km</div></div>` : ''}
+      ${speedKmh ? `<div class="act-stat"><div class="act-stat-label">Avg Speed</div><div class="act-stat-value">${speedKmh} km/h</div></div>` : ''}
+      ${d.average_heartrate ? `<div class="act-stat"><div class="act-stat-label">Avg HR</div><div class="act-stat-value">${Math.round(d.average_heartrate)} bpm</div></div>` : ''}
+      ${d.max_heartrate ? `<div class="act-stat"><div class="act-stat-label">Max HR</div><div class="act-stat-value">${Math.round(d.max_heartrate)} bpm</div></div>` : ''}
+      ${d.total_elevation_gain>0 ? `<div class="act-stat"><div class="act-stat-label">Elevation</div><div class="act-stat-value">${Math.round(d.total_elevation_gain)} m</div></div>` : ''}
+      ${d.calories ? `<div class="act-stat"><div class="act-stat-label">Calories</div><div class="act-stat-value">${d.calories} kcal</div></div>` : ''}
+      ${d.suffer_score ? `<div class="act-stat"><div class="act-stat-label">Suffer Score</div><div class="act-stat-value">${d.suffer_score}</div></div>` : ''}
+      ${d.gear ? `<div class="act-stat"><div class="act-stat-label">Gear</div><div class="act-stat-value" style="font-size:13px">${d.gear}</div></div>` : ''}
+    </div>
+    ${d.description ? `<p style="font-size:13px;color:#888;margin-bottom:16px">${d.description}</p>` : ''}
+    ${splitsHtml}
+    <a class="act-strava-link" href="https://www.strava.com/activities/${d.id}" target="_blank">View on Strava ↗</a>`;
+
+  // Draw map if polyline available
+  const mapEl = document.getElementById('actMapEl');
+  if (d.polyline) {
+    // Decode Google encoded polyline
+    const coords = decodePolyline(d.polyline);
+    if (coords.length > 0) {
+      setTimeout(()=>{
+        actMap = L.map(mapEl, { zoomControl:true, scrollWheelZoom:false });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution:'© OpenStreetMap', maxZoom:18
+        }).addTo(actMap);
+        const line = L.polyline(coords, { color:'#fc4c02', weight:4, opacity:0.85 });
+        line.addTo(actMap);
+        actMap.fitBounds(line.getBounds(), { padding:[20,20] });
+        // Start/end markers
+        L.circleMarker(coords[0], { radius:7, fillColor:'#06d6a0', color:'#fff', weight:2, fillOpacity:1 }).addTo(actMap);
+        L.circleMarker(coords[coords.length-1], { radius:7, fillColor:'#fc4c02', color:'#fff', weight:2, fillOpacity:1 }).addTo(actMap);
+      }, 50);
+    } else {
+      mapEl.innerHTML='<div class="act-map-placeholder">🗺️<span>No route data</span></div>';
+    }
+  } else if (d.start_latlng && d.start_latlng.length===2) {
+    setTimeout(()=>{
+      actMap = L.map(mapEl);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:18 }).addTo(actMap);
+      actMap.setView(d.start_latlng, 13);
+      L.circleMarker(d.start_latlng, { radius:8, fillColor:'#fc4c02', color:'#fff', weight:2, fillOpacity:1 }).addTo(actMap);
+    }, 50);
+  } else {
+    mapEl.innerHTML='<div class="act-map-placeholder">🗺️<span>No GPS data</span></div>';
+  }
+}
+
+// Google polyline decoder
+function decodePolyline(str) {
+  let idx=0, lat=0, lng=0, coords=[];
+  while (idx<str.length) {
+    let b, shift=0, result=0;
+    do { b=str.charCodeAt(idx++)-63; result|=(b&0x1f)<<shift; shift+=5; } while(b>=0x20);
+    lat += (result&1) ? ~(result>>1) : (result>>1);
+    shift=0; result=0;
+    do { b=str.charCodeAt(idx++)-63; result|=(b&0x1f)<<shift; shift+=5; } while(b>=0x20);
+    lng += (result&1) ? ~(result>>1) : (result>>1);
+    coords.push([lat/1e5, lng/1e5]);
+  }
+  return coords;
+}
+
+// ── BAR COLORS ────────────────────────────────────────────────────
 function barColors(values, hi='#fc4c02', mid='#ff8c42', lo='#ffd0b8') {
   const max = Math.max(...values);
-  return values.map(v => v >= max * 0.8 ? hi : v >= max * 0.4 ? mid : lo);
+  return values.map(v => v>=max*0.8 ? hi : v>=max*0.4 ? mid : lo);
 }
 
-// ── FETCH DATA & RENDER ───────────────────────────────────────────
-function loadStats(forceRefresh = false) {
-  document.getElementById('loading').style.display  = 'flex';
-  document.getElementById('content').style.display  = 'none';
-  const url = forceRefresh ? '/api/stats?refresh=1' : '/api/stats';
-
-  // Show a helpful message if it takes too long
-  const slowTimer = setTimeout(() => {
-    document.getElementById('loading').innerHTML = `
-      <div style="text-align:center;max-width:420px;padding:20px">
-        <div style="font-size:32px;margin-bottom:16px">⏳</div>
-        <p style="font-size:15px;font-weight:700;margin-bottom:8px">Still loading…</p>
-        <p style="font-size:13px;color:#aaa;margin-bottom:20px">
-          Strava is taking a while. You may be rate-limited (100 requests per 15 min).
-          If you logged in recently, your data is being fetched for the first time.
-        </p>
-        <a href="/demo" style="display:inline-block;background:#fc4c02;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;margin-right:8px">👀 Try demo instead</a>
-        <a href="/api/debug" target="_blank" style="display:inline-block;border:1px solid #eee;color:#aaa;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:13px;">🔍 Debug</a>
-      </div>`;
-  }, 8000);
-
-  fetch(url)
-    .then(r => {
-      if (!r.ok) return r.json().then(d => Promise.reject(d));
-      return r.json();
-    })
-    .then(d => {
-      clearTimeout(slowTimer);
-      document.getElementById('loading').style.display  = 'none';
-      document.getElementById('content').style.display  = 'block';
-      render(d);
-      startEnrichmentPolling();
-    })
-    .catch((err) => {
-      clearTimeout(slowTimer);
-      console.error('loadStats error:', err);
-      document.getElementById('loading').innerHTML =
-        `<div style="text-align:center;padding:20px">
-          <p style="color:#fc4c02;font-weight:700;margin-bottom:8px">Failed to load stats.</p>
-          <p style="font-size:12px;color:#aaa;margin-bottom:16px">${err}</p>
-          <a href="/" style="color:#fc4c02">Try again</a> &nbsp;·&nbsp;
-          <a href="/demo" style="color:#aaa">Use demo instead</a>
-        </div>`;
-    });
+// ── HELPERS ───────────────────────────────────────────────────────
+function fmtTime(secs) {
+  const h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60);
+  return h>0 ? `${h}h ${m}m` : `${m}m`;
+}
+function round1(v) { return Math.round(v * 10) / 10; }
+function deltaTag(curr, prev) {
+  if (!prev || !curr) return '';
+  const d = curr - prev;
+  if (d===0) return '<span class="wc-delta delta-flat">→</span>';
+  return d>0
+    ? `<span class="wc-delta delta-up">+${Math.round(d*10)/10}</span>`
+    : `<span class="wc-delta delta-down">${Math.round(d*10)/10}</span>`;
 }
 
-function refreshData() {
-  const btn = document.getElementById('refreshBtn');
-  btn.textContent = '↻ Syncing…';
-  btn.disabled = true;
-  // Destroy all existing charts so they redraw cleanly
-  Chart.helpers.each(Chart.instances, c => c.destroy());
-  loadStats(true);
-  setTimeout(() => { btn.textContent = '↻ Refresh'; btn.disabled = false; }, 5000);
+// ── ACHIEVEMENTS ─────────────────────────────────────────────────
+let allAchievements = [];
+let achCurrentFilter = 'all';
+
+const ACH_CATEGORIES = {
+  running:        { label:'🏃 Running Distance', icon:'🏃' },
+  cycling:        { label:'🚴 Cycling Distance & Total', icon:'🚴' },
+  swimming:       { label:'🏊 Swimming', icon:'🏊' },
+  total_distance: { label:'📍 Running Total km', icon:'📍' },
+  pace:           { label:'⚡ Pace Milestones', icon:'⚡' },
+  duration:       { label:'⏱️ Session Duration', icon:'⏱️' },
+  streak:         { label:'🔥 Consistency Streaks', icon:'🔥' },
+};
+
+function renderAchievements(data) {
+  allAchievements = data;
+  achRender();
 }
 
-loadStats();
-
-// ── WEATHER ENRICHMENT POLLING ────────────────────────────────────
-let weatherChartT = null;
-let weatherChartC = null;
-let enrichPollTimer = null;
-
-function startEnrichmentPolling() {
-  pollEnrichment();
+function achSetFilter(cat, btn) {
+  achCurrentFilter = cat;
+  document.querySelectorAll('.ach-filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  achRender();
 }
 
-function pollEnrichment() {
-  fetch('/api/enrichment')
-    .then(r => r.json())
-    .then(d => {
-      const { total, done, complete } = d;
-      if (total === 0) return;
+function achRender() {
+  const filtered = achCurrentFilter==='all' ? allAchievements : allAchievements.filter(a=>a.category===achCurrentFilter);
+  const container = document.getElementById('achContent');
 
-      const pct = Math.round(done / total * 100);
-      const bar  = document.getElementById('enrichProgress');
-      const fill = document.getElementById('enrichFill');
-      const stat = document.getElementById('enrichStatus');
+  if (filtered.length===0) {
+    container.innerHTML='<p style="color:#bbb;padding:20px">No achievements in this category.</p>';
+    return;
+  }
 
-      if (!complete) {
-        bar.style.display = 'flex';
-        fill.style.width  = pct + '%';
-        stat.textContent  = `Fetching weather & locations… ${done}/${total}`;
-        enrichPollTimer = setTimeout(pollEnrichment, 4000);
-      } else {
-        bar.style.display = 'none';
-        // Load and render weather insights
-        loadWeatherInsights();
-        // Reload table if it's already been opened (to get location/weather cols)
-        if (tblAllRows.length > 0) {
-          tblAllRows = [];
-          loadActivitiesTable();
-        }
-      }
-    })
-    .catch(() => {});
+  // Group by category
+  const groups = {};
+  filtered.forEach(a => {
+    if (!groups[a.category]) groups[a.category]=[];
+    groups[a.category].push(a);
+  });
+
+  let html='';
+  for (const [cat, items] of Object.entries(groups)) {
+    const catInfo = ACH_CATEGORIES[cat] || { label: cat, icon: '🏅' };
+    const sorted = [...items].sort((a,b)=>b.unlocked-a.unlocked);
+    const unlocked = sorted.filter(a=>a.unlocked).length;
+    html += `<div class="ach-section-title">${catInfo.label} <span style="color:#fc4c02;font-size:11px">${unlocked}/${sorted.length}</span></div>`;
+    html += `<div class="ach-grid">`;
+    html += sorted.map(a=>`
+      <div class="ach-card ${a.unlocked?'unlocked':'locked'}">
+        ${a.unlocked?'<div class="ach-badge">✓</div>':''}
+        <div class="ach-icon">${a.icon}</div>
+        <div class="ach-name">${a.name}</div>
+        <div class="ach-desc">${a.desc}</div>
+        ${a.unlocked&&a.date ? `<div class="ach-date">${a.date}</div><div class="ach-value">${a.value||''}</div>`
+          : a.unlocked ? `<div class="ach-value">${a.value||'✓'}</div>`
+          : '<div class="ach-locked-label">🔒 Not yet</div>'}
+      </div>`).join('');
+    html += '</div>';
+  }
+  container.innerHTML = html;
 }
 
-function loadWeatherInsights() {
-  fetch('/api/weather-insights')
-    .then(r => r.json())
-    .then(d => {
-      if (!d.runs_with_weather || d.runs_with_weather < 3) return;
-      renderWeatherInsights(d);
-    });
-}
+// ── STATS TAB ────────────────────────────────────────────────────
+function renderStats(s) {
+  document.getElementById('statsContent').innerHTML = `
+    <div class="stat-hero">
+      <div class="stat-hero-item"><div class="label">Total Activities</div><div class="value">${s.total_activities}</div></div>
+      <div class="stat-hero-item"><div class="label">Total Distance</div><div class="value">${s.total_dist_km} km</div></div>
+      <div class="stat-hero-item"><div class="label">Moving Time</div><div class="value">${fmtTime(s.total_moving_sec)}</div></div>
+      <div class="stat-hero-item"><div class="label">Active Days</div><div class="value">${s.active_days}</div></div>
+    </div>
 
-function renderWeatherInsights(d) {
-  const area = document.getElementById('weatherInsightsArea');
-  area.innerHTML = `
-    <div class="weather-best">
-      <div class="weather-best-card highlight">
-        <div class="wb-label">You run fastest in</div>
-        <div class="wb-value">${d.best_temp || '—'}</div>
-        <div class="wb-sub">Best temperature for your pace</div>
-      </div>
-      <div class="weather-best-card highlight">
-        <div class="wb-label">Best weather condition</div>
-        <div class="wb-value">${d.best_cond || '—'}</div>
-        <div class="wb-sub">Lowest average pace in these conditions</div>
-      </div>
-      <div class="weather-best-card">
-        <div class="wb-label">Runs analysed</div>
-        <div class="wb-value">${d.runs_with_weather}</div>
-        <div class="wb-sub">with weather data</div>
+    <div class="stats-section">
+      <div class="stats-section-header"><span class="s-icon">🌍</span> General</div>
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-row-label">Total activities</span><div class="stat-row-right"><div class="stat-row-value">${s.total_activities}</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Total run distance</span><div class="stat-row-right"><div class="stat-row-value">${s.total_dist_km} km</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Avg per activity</span><div class="stat-row-right"><div class="stat-row-value">${s.avg_dist_km} km</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Longest activity</span><div class="stat-row-right"><div class="stat-row-value">${s.max_dist_km} km</div><div class="stat-row-sub">${s.max_dist_name}</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">🌍 Trips around the world</span><div class="stat-row-right"><div class="stat-row-value">${s.trips_world}×</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">🌙 Trips to the moon</span><div class="stat-row-right"><div class="stat-row-value">${s.trips_moon}×</div></div></div>
       </div>
     </div>
-    <div class="chart-grid">
-      <div class="chart-card">
-        <div class="chart-title">Pace by Temperature</div>
-        <div class="chart-sub">Lower bar = faster average pace at that temperature</div>
-        <div class="chart-wrap"><canvas id="weatherTempChart"></canvas></div>
+
+    <div class="stats-section">
+      <div class="stats-section-header"><span class="s-icon">📅</span> Distance to Date</div>
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-row-label">This year</span><div class="stat-row-right"><div class="stat-row-value">${s.dist_this_year} km</div><div class="stat-row-sub">${s.dist_year_weekly_avg} km/week</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Rolling year</span><div class="stat-row-right"><div class="stat-row-value">${s.dist_rolling_year} km</div><div class="stat-row-sub">${s.dist_rolling_weekly_avg} km/week</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">This month</span><div class="stat-row-right"><div class="stat-row-value">${s.dist_this_month} km</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Rolling 30 days</span><div class="stat-row-right"><div class="stat-row-value">${s.dist_rolling_month} km</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">This week</span><div class="stat-row-right"><div class="stat-row-value">${s.dist_this_week} km</div></div></div>
       </div>
-      <div class="chart-card">
-        <div class="chart-title">Pace by Weather Condition</div>
-        <div class="chart-sub">Lower bar = faster in those conditions</div>
-        <div class="chart-wrap"><canvas id="weatherCondChart"></canvas></div>
+    </div>
+
+    <div class="stats-section">
+      <div class="stats-section-header"><span class="s-icon">⏱️</span> Time</div>
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-row-label">Total moving time</span><div class="stat-row-right"><div class="stat-row-value">${fmtTime(s.total_moving_sec)}</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Total elapsed time</span><div class="stat-row-right"><div class="stat-row-value">${fmtTime(s.total_elapsed_sec)}</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Efficiency</span><div class="stat-row-right"><div class="stat-row-value">${s.efficiency_pct}%</div><div class="stat-row-sub">moving ÷ elapsed</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Longest session</span><div class="stat-row-right"><div class="stat-row-value">${fmtTime(s.max_moving_sec)}</div><div class="stat-row-sub">${s.max_moving_name}</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Active days total</span><div class="stat-row-right"><div class="stat-row-value">${s.active_days} days</div></div></div>
+      </div>
+    </div>
+
+    <div class="stats-section">
+      <div class="stats-section-header"><span class="s-icon">🔥</span> Streaks</div>
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-row-label">Current streak</span><div class="stat-row-right">
+          ${s.streak_needs_today
+            ? `<div class="stat-row-value" style="color:#1a1a2e">${s.current_streak} days &nbsp;<span style="font-size:11px;font-weight:700;background:#fff7ed;color:#b45309;padding:3px 9px;border-radius:8px;border:1px solid #fed7aa">train today !</span></div>`
+            : `<div class="stat-row-value" style="color:#fc4c02">${s.current_streak} days 🔥</div>`}
+        </div></div>
+        <div class="stat-row"><span class="stat-row-label">Best streak ever</span><div class="stat-row-right"><div class="stat-row-value">${s.max_streak} days</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Longest rest gap</span><div class="stat-row-right"><div class="stat-row-value">${s.max_rest_days} days</div></div></div>
+      </div>
+    </div>
+
+    <div class="stats-section">
+      <div class="stats-section-header"><span class="s-icon">⛰️</span> Elevation</div>
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-row-label">Total elevation gain</span><div class="stat-row-right"><div class="stat-row-value">${s.total_elev_m.toLocaleString()} m</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">🏔️ Everest climbs</span><div class="stat-row-right"><div class="stat-row-value">${s.everest_climbs}×</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Climb rate</span><div class="stat-row-right"><div class="stat-row-value">${s.climb_rate_m_per_km} m/km</div></div></div>
+        <div class="stat-row"><span class="stat-row-label">Best single elevation</span><div class="stat-row-right"><div class="stat-row-value">${s.max_elev_m} m</div><div class="stat-row-sub">${s.max_elev_name}</div></div></div>
       </div>
     </div>`;
+}
 
-  if (weatherChartT) weatherChartT.destroy();
-  if (weatherChartC) weatherChartC.destroy();
+// ── INSIGHTS ─────────────────────────────────────────────────────
+function renderPerfInsights(d) {
+  const cards = [];
+  if (d.best_month) cards.push({ icon:'🏆', label:'Best Month', color:'highlight', value:d.best_month, sub:`${d.best_month_km} km run that month` });
+  if (d.stats && d.stats.current_streak>0) {
+    const sNeedsToday = d.stats.streak_needs_today;
+    cards.push({
+      icon: sNeedsToday ? '⏰' : '🔥',
+      label: 'Current Streak',
+      color: sNeedsToday ? 'yellow' : 'highlight',
+      value: d.stats.current_streak + ' days',
+      sub: sNeedsToday ? 'Train today to keep it!' : `Best ever: ${d.stats.max_streak} days`
+    });
+  }
+  if (d.stats) cards.push({ icon:'📅', label:'Active Days', color:'', value:d.stats.active_days, sub:`${d.stats.dist_this_year} km so far this year` });
+  if (d.most_active_sport) cards.push({ icon:'🥇', label:'Top Sport', color:'purple', value:SPORT_LABELS[d.most_active_sport]||d.most_active_sport, sub:`Out of ${d.stats?.total_activities||'?'} activities` });
+  if (d.stats) cards.push({ icon:'⛰️', label:'Everest Climbs', color:'blue', value:d.stats.everest_climbs+'×', sub:`${d.stats.total_elev_m?.toLocaleString()} m total gain` });
+  if (d.stats) cards.push({ icon:'🌍', label:'World Trips', color:'green', value:d.stats.trips_world+'×', sub:`${d.stats.trips_moon}× to the moon` });
+  document.getElementById('perfInsightGrid').innerHTML = cards.map(c=>`
+    <div class="insight-card ${c.color}"><div class="ic-icon">${c.icon}</div><div class="ic-label">${c.label}</div><div class="ic-value">${c.value}</div><div class="ic-sub">${c.sub}</div></div>`).join('');
+}
 
-  weatherChartT = new Chart(document.getElementById('weatherTempChart'), {
-    type: 'bar',
-    data: {
-      labels: d.temp_labels,
-      datasets: [{
-        data: d.temp_values,
-        backgroundColor: d.temp_labels.map(l => l === d.best_temp ? C.orange : C.orange3),
-        borderRadius: 7, borderSkipped: false,
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} min/km avg` } } },
-      scales: {
-        y: { reverse: true, grid: { color: '#f5f5f5' }, ticks: { callback: v => v + ' min/km' } },
-        x: { grid: { display: false } }
-      }
+// ── WEATHER ───────────────────────────────────────────────────────
+let weatherChartT=null, weatherChartC=null, enrichPollTimer=null;
+function startEnrichmentPolling() { pollEnrichment(); }
+function pollEnrichment() {
+  fetch('/api/enrichment').then(r=>r.json()).then(d=>{
+    const {total,done,complete}=d;
+    if (total===0) return;
+    if (!complete) {
+      document.getElementById('enrichProgress').style.display='flex';
+      document.getElementById('enrichFill').style.width=Math.round(done/total*100)+'%';
+      document.getElementById('enrichStatus').textContent=`Enriching runs… ${done}/${total}`;
+      enrichPollTimer=setTimeout(pollEnrichment,4000);
+    } else {
+      document.getElementById('enrichProgress').style.display='none';
+      loadWeatherInsights();
+      if (tblAllRows.length>0) { tblAllRows=[]; loadActivitiesTable(); }
     }
-  });
-
-  weatherChartC = new Chart(document.getElementById('weatherCondChart'), {
-    type: 'bar',
-    data: {
-      labels: d.cond_labels,
-      datasets: [{
-        data: d.cond_values,
-        backgroundColor: d.cond_labels.map(l => l === d.best_cond ? C.green : '#d4f5ee'),
-        borderRadius: 7, borderSkipped: false,
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} min/km avg` } } },
-      scales: {
-        x: { reverse: true, grid: { color: '#f5f5f5' }, ticks: { callback: v => v + ' min/km' } },
-        y: { grid: { display: false } }
-      }
-    }
-  });
+  }).catch(()=>{});
+}
+function loadWeatherInsights() {
+  fetch('/api/weather-insights').then(r=>r.json()).then(d=>{ if(d.runs_with_weather>=3) renderWeatherInsights(d); });
+}
+function renderWeatherInsights(d) {
+  const area=document.getElementById('weatherInsightsArea');
+  area.innerHTML=`
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:20px">
+      <div class="insight-card highlight" style="flex:1;min-width:180px"><div class="ic-icon">🌡️</div><div class="ic-label">Best temp to run</div><div class="ic-value">${d.best_temp||'—'}</div><div class="ic-sub">Fastest avg pace at this temp</div></div>
+      <div class="insight-card green" style="flex:1;min-width:180px"><div class="ic-icon">☁️</div><div class="ic-label">Best weather condition</div><div class="ic-value">${d.best_cond||'—'}</div><div class="ic-sub">Lowest avg pace in these conditions</div></div>
+      <div class="insight-card" style="flex:0 0 auto;min-width:140px"><div class="ic-icon">🏃</div><div class="ic-label">Runs analysed</div><div class="ic-value">${d.runs_with_weather}</div><div class="ic-sub">with weather data</div></div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-card"><div class="chart-title">Pace by Temperature</div><div class="chart-sub">Lower = faster. Best temp highlighted.</div><div class="chart-wrap"><canvas id="weatherTempChart"></canvas></div></div>
+      <div class="chart-card"><div class="chart-title">Pace by Weather Condition</div><div class="chart-sub">Lower = faster. Best condition highlighted.</div><div class="chart-wrap"><canvas id="weatherCondChart"></canvas></div>
+      </div></div>`;
+  if(weatherChartT) weatherChartT.destroy();
+  if(weatherChartC) weatherChartC.destroy();
+  weatherChartT=new Chart(document.getElementById('weatherTempChart'),{type:'bar',data:{labels:d.temp_labels,datasets:[{data:d.temp_values,backgroundColor:d.temp_labels.map(l=>l===d.best_temp?C.orange:C.orange3),borderRadius:7,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} min/km avg`}}},scales:{y:{reverse:true,grid:{color:'#f5f5f5'},ticks:{callback:v=>v+' min/km'}},x:{grid:{display:false}}}}});
+  weatherChartC=new Chart(document.getElementById('weatherCondChart'),{type:'bar',data:{labels:d.cond_labels,datasets:[{data:d.cond_values,backgroundColor:d.cond_labels.map(l=>l===d.best_cond?C.green:'#d4f5ee'),borderRadius:7,borderSkipped:false}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} min/km avg`}}},scales:{x:{reverse:true,grid:{color:'#f5f5f5'},ticks:{callback:v=>v+' min/km'}},y:{grid:{display:false}}}}});
 }
 
 // ── ACTIVITIES TABLE ──────────────────────────────────────────────
-let tblAllRows   = [];   // full dataset from /api/activities
-let tblFiltered  = [];   // after search/filter
-let tblSortKey   = 'date';
-let tblSortDir   = -1;   // -1 = desc, 1 = asc
-const TBL_PER_PAGE = 25;
+let tblAllRows=[], tblFiltered=[], tblSortKey='date', tblSortDir=-1, tblPageCurrent=0;
+const TBL_PER_PAGE=25;
 
-// Lazy-load — only fetch when user opens the tab
 function switchTab(name) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
   document.getElementById(`tab-${name}`).classList.add('active');
-  if (name === 'activities' && tblAllRows.length === 0) {
-    loadActivitiesTable();
-  }
+  if (name==='activities'&&tblAllRows.length===0) loadActivitiesTable();
 }
 
 function loadActivitiesTable() {
-  document.getElementById('tblBody').innerHTML =
-    '<tr><td colspan="13" class="tbl-empty">Loading…</td></tr>';
-  fetch('/api/activities')
-    .then(r => r.json())
-    .then(rows => {
-      tblAllRows = rows;
-      tblFilter();
-    })
-    .catch(() => {
-      document.getElementById('tblBody').innerHTML =
-        '<tr><td colspan="13" class="tbl-empty" style="color:#fc4c02">Failed to load activities.</td></tr>';
-    });
+  document.getElementById('tblBody').innerHTML='<tr><td colspan="12" class="tbl-empty">Loading…</td></tr>';
+  fetch('/api/activities').then(r=>r.json()).then(rows=>{
+    tblAllRows=rows;
+    const sports=[...new Set(rows.map(r=>r.sport).filter(Boolean))].sort();
+    const sel=document.getElementById('tblSport');
+    sel.innerHTML='<option value="">All sports</option>'+sports.map(s=>`<option value="${s}">${SPORT_LABELS[s]||s}</option>`).join('');
+    tblFilter();
+  }).catch(()=>{
+    document.getElementById('tblBody').innerHTML='<tr><td colspan="12" class="tbl-empty" style="color:#fc4c02">Failed to load.</td></tr>';
+  });
+}
+
+function filterBySport(sport) {
+  switchTab('activities');
+  if (tblAllRows.length===0) { setTimeout(()=>{ document.getElementById('tblSport').value=sport; tblFilter(); },800); }
+  else { document.getElementById('tblSport').value=sport; tblFilter(); }
 }
 
 function tblFilter() {
-  const q      = document.getElementById('tblSearch').value.toLowerCase();
-  const sport  = document.getElementById('tblSport').value;
-  const period = parseInt(document.getElementById('tblPeriod').value) || 0;
-  const cutoff = period ? new Date(Date.now() - period * 864e5).toISOString().slice(0,10) : null;
-
-  tblFiltered = tblAllRows.filter(r => {
-    if (sport  && r.sport !== sport) return false;
-    if (cutoff && r.date < cutoff)   return false;
-    if (q && !r.name.toLowerCase().includes(q)) return false;
+  const q=document.getElementById('tblSearch').value.toLowerCase();
+  const sport=document.getElementById('tblSport').value;
+  const period=parseInt(document.getElementById('tblPeriod').value)||0;
+  const minDist=parseFloat(document.getElementById('tblMinDist').value)||0;
+  const maxDist=parseFloat(document.getElementById('tblMaxDist').value)||Infinity;
+  const cutoff=period?new Date(Date.now()-period*864e5).toISOString().slice(0,10):null;
+  tblFiltered=tblAllRows.filter(r=>{
+    if(sport&&r.sport!==sport) return false;
+    if(cutoff&&r.date<cutoff) return false;
+    if(q&&!r.name.toLowerCase().includes(q)) return false;
+    if(r.dist_km<minDist) return false;
+    if(r.dist_km>maxDist) return false;
     return true;
   });
-  tblPageCurrent = 0;
-  tblRender();
+  tblPageCurrent=0; tblRender();
 }
-
-let tblPageCurrent = 0;
 
 function tblSort(key) {
-  if (tblSortKey === key) { tblSortDir *= -1; }
-  else { tblSortKey = key; tblSortDir = -1; }
-  // Update header indicators
-  document.querySelectorAll('thead th').forEach(th => {
-    th.classList.remove('sort-asc','sort-desc');
+  tblSortDir = tblSortKey===key ? tblSortDir*-1 : -1;
+  tblSortKey=key;
+  document.querySelectorAll('thead th').forEach(th=>th.classList.remove('sort-asc','sort-desc'));
+  const th=document.getElementById(`th-${key}`);
+  if(th) th.classList.add(tblSortDir===1?'sort-asc':'sort-desc');
+  tblFiltered.sort((a,b)=>{
+    let av=a[key],bv=b[key];
+    if(['dist_km','elevation','hr','calories','suffer','temp_c'].includes(key)){av=parseFloat(av)||0;bv=parseFloat(bv)||0;}
+    return av<bv?-tblSortDir:av>bv?tblSortDir:0;
   });
-  const th = document.getElementById(`th-${key}`);
-  if (th) th.classList.add(tblSortDir === 1 ? 'sort-asc' : 'sort-desc');
-  tblFiltered.sort((a, b) => {
-    let av = a[key], bv = b[key];
-    // Numeric sort for known numeric fields
-    if (['dist_km','elevation','hr','calories','suffer'].includes(key)) {
-      av = parseFloat(av) || 0;
-      bv = parseFloat(bv) || 0;
-    }
-    if (av < bv) return -tblSortDir;
-    if (av > bv) return  tblSortDir;
-    return 0;
-  });
-  tblPageCurrent = 0;
+  tblPageCurrent=0; tblRender();
+}
+function tblPageNav(dir){
+  const max=Math.ceil(tblFiltered.length/TBL_PER_PAGE)-1;
+  tblPageCurrent=Math.max(0,Math.min(max,tblPageCurrent+dir));
   tblRender();
 }
-
-function tblPageNav(dir) {
-  const maxPage = Math.ceil(tblFiltered.length / TBL_PER_PAGE) - 1;
-  tblPageCurrent = Math.max(0, Math.min(maxPage, tblPageCurrent + dir));
-  tblRender();
-}
-
-const SPORT_LABELS = {
-  Run:'Running', WeightTraining:'Gym', Squash:'Squash',
-  Ride:'Cycling', Swim:'Swimming', Walk:'Walk',
-};
-
 function tblRender() {
-  const start = tblPageCurrent * TBL_PER_PAGE;
-  const rows  = tblFiltered.slice(start, start + TBL_PER_PAGE);
-  const total = tblFiltered.length;
-  const maxPage = Math.max(0, Math.ceil(total / TBL_PER_PAGE) - 1);
-
-  document.getElementById('tblCount').textContent =
-    `${total} activit${total !== 1 ? 'ies' : 'y'}`;
-  document.getElementById('tblPageInfo').textContent =
-    total === 0 ? '' : `${start + 1}–${Math.min(start + TBL_PER_PAGE, total)} of ${total}`;
-  document.getElementById('tblPrev').disabled = tblPageCurrent === 0;
-  document.getElementById('tblNext').disabled = tblPageCurrent >= maxPage;
-
-  if (rows.length === 0) {
-    document.getElementById('tblBody').innerHTML =
-      '<tr><td colspan="13" class="tbl-empty">No activities match your filters.</td></tr>';
-    return;
-  }
-
-  const sportClass = s => `sport-badge sport-${['Run','WeightTraining','Squash','Ride'].includes(s) ? s : 'Other'}`;
-  const fmt = v => (v === null || v === undefined || v === '—') ? '<span style="color:#ddd">—</span>' : v;
-
-  document.getElementById('tblBody').innerHTML = rows.map(r => `
-    <tr>
+  const start=tblPageCurrent*TBL_PER_PAGE, rows=tblFiltered.slice(start,start+TBL_PER_PAGE), total=tblFiltered.length;
+  const max=Math.max(0,Math.ceil(total/TBL_PER_PAGE)-1);
+  document.getElementById('tblCount').textContent=`${total} activit${total!==1?'ies':'y'}`;
+  document.getElementById('tblPageInfo').textContent=total===0?'':`${start+1}–${Math.min(start+TBL_PER_PAGE,total)} of ${total}`;
+  document.getElementById('tblPrev').disabled=tblPageCurrent===0;
+  document.getElementById('tblNext').disabled=tblPageCurrent>=max;
+  if(!rows.length){document.getElementById('tblBody').innerHTML='<tr><td colspan="12" class="tbl-empty">No activities match.</td></tr>';return;}
+  const sc=s=>`sport-badge sport-${['Run','WeightTraining','Squash','Ride','Swim'].includes(s)?s:'Other'}`;
+  const f=v=>(v===null||v===undefined||v==='—')?'<span style="color:#ddd">—</span>':v;
+  document.getElementById('tblBody').innerHTML=rows.map(r=>`
+    <tr onclick="openActModal(${r.id},'${r.name.replace(/'/g,"\\'")}','${r.sport}')" title="Click to view details">
       <td style="color:#aaa;font-size:12px;white-space:nowrap">${r.date}</td>
-      <td><a class="tbl-link tbl-name" href="https://www.strava.com/activities/${r.id}" target="_blank" title="${r.name}">${r.name}</a></td>
-      <td><span class="${sportClass(r.sport)}">${SPORT_LABELS[r.sport] || r.sport}</span></td>
-      <td style="font-size:12px;color:#888;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.location || fmt('—')}</td>
-      <td>${r.dist_km > 0 ? r.dist_km + ' km' : fmt('—')}</td>
-      <td>${fmt(r.time)}</td>
-      <td>${fmt(r.pace)}</td>
-      <td>${r.elevation > 0 ? r.elevation + ' m' : fmt('—')}</td>
-      <td>${fmt(r.hr)}</td>
-      <td style="white-space:nowrap">${r.temp_c !== '' ? r.temp_c + '°C' : fmt('—')}</td>
-      <td style="white-space:nowrap;font-size:13px">${r.weather || fmt('—')}</td>
-      <td>${fmt(r.calories)}</td>
-      <td>${fmt(r.suffer)}</td>
+      <td><span class="tbl-name" title="${r.name}">${r.name}</span></td>
+      <td><span class="${sc(r.sport)}" onclick="event.stopPropagation();filterBySport('${r.sport}')">${SPORT_LABELS[r.sport]||r.sport}</span></td>
+      <td style="font-size:12px;color:#888;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.location||f('—')}</td>
+      <td>${r.dist_km>0?r.dist_km+' km':f('—')}</td>
+      <td>${f(r.time)}</td>
+      <td>${f(r.pace)}</td>
+      <td>${r.elevation>0?r.elevation+' m':f('—')}</td>
+      <td>${f(r.hr)}</td>
+      <td style="white-space:nowrap">${r.temp_c!==''?r.temp_c+'°C':f('—')}</td>
+      <td>${f(r.calories)}</td>
+      <td>${f(r.suffer)}</td>
     </tr>`).join('');
 }
 
+// ── LOAD & RENDER ─────────────────────────────────────────────────
+function loadStats(forceRefresh=false) {
+  document.getElementById('loading').style.display='flex';
+  document.getElementById('content').style.display='none';
+  document.getElementById('shareFab').style.display='none';
+  const slowTimer=setTimeout(()=>{
+    document.getElementById('loading').innerHTML=`<div style="text-align:center;max-width:420px;padding:20px"><div style="font-size:32px;margin-bottom:16px">⏳</div><p style="font-size:15px;font-weight:700;margin-bottom:8px">Still loading…</p><p style="font-size:13px;color:#aaa;margin-bottom:20px">Strava may be slow or rate-limited.</p><a href="/demo" style="display:inline-block;background:#fc4c02;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;margin-right:8px">👀 Try demo</a><a href="/api/debug" target="_blank" style="display:inline-block;border:1px solid #eee;color:#aaa;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:13px;">🔍 Debug</a></div>`;
+  },8000);
+  fetch(forceRefresh?'/api/stats?refresh=1':'/api/stats')
+    .then(r=>{if(!r.ok)return r.json().then(d=>Promise.reject(d));return r.json();})
+    .then(d=>{
+      clearTimeout(slowTimer);
+      document.getElementById('loading').style.display='none';
+      document.getElementById('content').style.display='block';
+      document.getElementById('shareFab').style.display='flex';
+      render(d); startEnrichmentPolling();
+    })
+    .catch(err=>{
+      clearTimeout(slowTimer);
+      document.getElementById('loading').innerHTML=`<div style="text-align:center;padding:20px"><p style="color:#fc4c02;font-weight:700;margin-bottom:8px">Failed to load.</p><a href="/" style="color:#fc4c02">Try again</a> &nbsp;·&nbsp; <a href="/demo" style="color:#aaa">Demo mode</a></div>`;
+    });
+}
+function refreshData() { Chart.helpers.each(Chart.instances,c=>c.destroy()); loadStats(true); }
+loadStats();
+
+// ── MAIN RENDER ───────────────────────────────────────────────────
 function render(d) {
+  fillProfileCard(d);
+
+  // Data range banner
+  if (d.data_range&&d.data_range.first) {
+    const fmt=s=>{ const [y,m,day]=s.split('-'); return `${day} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]} ${y}`; };
+    document.getElementById('dataRangeText').innerHTML=`Data: <strong>${fmt(d.data_range.first)}</strong> → <strong>${fmt(d.data_range.last)}</strong> &nbsp;·&nbsp; <strong>${d.data_range.total}</strong> activities`;
+    document.getElementById('dataRangeBanner').style.display='flex';
+  }
 
   // ── OVERVIEW CARDS ────────────────────────────────────────────
-  document.getElementById('totalRuns').textContent    = d.total_runs;
-  document.getElementById('totalKm').textContent      = d.total_run_km + ' km';
-  document.getElementById('totalGym').textContent     = d.total_gym;
-  document.getElementById('longestRun').textContent   = d.longest_run + ' km';
-  document.getElementById('totalSquash').textContent  = d.total_squash;
-  const pi = d.pace_improvement;
-  document.getElementById('paceImprove').textContent  = pi && pi > 0 ? '+' + pi : pi || '—';
+  document.getElementById('totalRuns').textContent=d.total_runs;
+  document.getElementById('totalKm').textContent=d.total_run_km+' km';
+  document.getElementById('totalGym').textContent=d.total_gym;
+  document.getElementById('longestRun').textContent=d.longest_run+' km';
+  document.getElementById('totalRides').textContent=d.total_rides||0;
+  document.getElementById('totalRideKm').textContent=(d.total_ride_km||0)+' km';
+  const pi=d.pace_improvement;
+  document.getElementById('paceImprove').textContent=pi&&pi>0?'+'+pi:pi||'—';
 
-  // ── PIE ───────────────────────────────────────────────────────
-  new Chart(document.getElementById('pieChart'), {
-    type:'doughnut',
-    data:{
-      labels: d.sport_counts.map(s => s.sport),
-      datasets:[{ data: d.sport_counts.map(s => s.count),
-        backgroundColor:[C.orange,C.blue,C.green,C.purple,C.yellow,'#ccc'],
-        borderWidth:0, hoverOffset:8 }]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false, cutout:'62%',
-      plugins:{
-        legend:{ position:'right', labels:{ boxWidth:11, padding:12, font:{size:11} } },
-        tooltip:{ callbacks:{ label: c => ` ${c.label}: ${c.raw} sessions` } }
-      }
-    }
+  // ── WEEK COMPARE ──────────────────────────────────────────────
+  if (d.this_week&&d.last_week) {
+    const tw=d.this_week, lw=d.last_week;
+    document.getElementById('twSessions').textContent=tw.sessions;
+    document.getElementById('twKm').textContent=tw.km;
+    document.getElementById('twTime').textContent=fmtTime(tw.time_sec);
+    document.getElementById('lwSessions').textContent=lw.sessions;
+    document.getElementById('lwKm').textContent=lw.km;
+    document.getElementById('lwTime').textContent=fmtTime(lw.time_sec);
+    document.getElementById('deltaSessions').innerHTML=deltaTag(tw.sessions,lw.sessions);
+    document.getElementById('deltaKm').innerHTML=deltaTag(tw.km,lw.km);
+  }
+
+  // ── OVERVIEW PRs ──────────────────────────────────────────────
+  const ovPrGrid=document.getElementById('overviewPrGrid');
+  ['5K','10K','HM','Marathon'].forEach(key=>{
+    const pr=d.prs[key]; if(!pr) return;
+    const names={'5K':'5 km','10K':'10 km','HM':'Half Marathon','Marathon':'Marathon'};
+    const ovClick=pr.id?`onclick="openActModal(${pr.id},'${(pr.name||'').replace(/'/g,"\\'")}','Run')" style="cursor:pointer" title="View activity"`:'';
+    ovPrGrid.innerHTML+=`<div class="pr-card" ${ovClick}><div class="pr-badge">PR</div><div class="pr-label">${names[key]}</div><div class="pr-time">${pr.display}</div><div class="pr-pace">${pr.pace} /km</div><div class="pr-date">${pr.date}${pr.id?` <span style="font-size:10px;color:#fc4c02">↗ tap</span>`:''}</div></div>`;
   });
 
-  // ── CALORIE CHART ─────────────────────────────────────────────
-  if (d.cal_labels.length > 0) {
-    new Chart(document.getElementById('calChart'), {
-      type:'bar',
-      data:{
-        labels: d.cal_labels,
-        datasets:[{ data: d.cal_values, backgroundColor: barColors(d.cal_values), borderRadius:6, borderSkipped:false }]
-      },
-      options:{
-        indexAxis:'y', responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => ` ${c.raw} kcal/hr` } } },
-        scales:{ x:{ grid:{color:'#f5f5f5'}, ticks:{callback: v => v+' kcal'} }, y:{grid:{display:false}} }
-      }
-    });
-  }
+  // ── RECENT ACTIVITIES ─────────────────────────────────────────
+  const recentList=document.getElementById('recentList');
+  (d.recent_activities||[]).forEach(a=>{
+    const color=SPORT_COLORS[a.sport]||'#ccc';
+    const meta=[a.dist_km>0?a.dist_km+' km':null, a.time, a.pace?a.pace+'/km':a.speed_kmh?a.speed_kmh+' km/h':null].filter(Boolean).join(' · ');
+    recentList.innerHTML+=`<div class="recent-item" onclick="openActModal(${a.id},'${a.name.replace(/'/g,"\\'")}','${a.sport}')">
+      <div class="recent-sport-dot" style="background:${color}"></div>
+      <div class="recent-name">${a.name}</div>
+      <div class="recent-meta">${a.date}</div>
+      <div class="recent-meta" style="color:#666">${meta}</div>
+      <div class="recent-badge" style="background:${color}20;color:${color}">${SPORT_LABELS[a.sport]||a.sport}</div>
+    </div>`;
+  });
+
+  // ── PIE ───────────────────────────────────────────────────────
+  new Chart(document.getElementById('pieChart'),{type:'doughnut',data:{labels:d.sport_counts.map(s=>s.sport),datasets:[{data:d.sport_counts.map(s=>s.count),backgroundColor:[C.orange,C.blue,C.green,C.purple,C.yellow,C.teal,'#ccc'],borderWidth:0,hoverOffset:10}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'right',labels:{boxWidth:11,padding:12,font:{size:11}}},tooltip:{callbacks:{label:c=>` ${c.label}: ${c.raw} sessions`}}},onClick:(e,els)=>{ if(els.length>0) filterBySport(d.sport_counts[els[0].index].sport); }}});
+
+  // ── CALORIES ──────────────────────────────────────────────────
+  if(d.cal_labels.length>0) new Chart(document.getElementById('calChart'),{type:'bar',data:{labels:d.cal_labels,datasets:[{data:d.cal_values,backgroundColor:barColors(d.cal_values),borderRadius:6,borderSkipped:false}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} kcal/hr`}}},scales:{x:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+' kcal'}},y:{grid:{display:false}}},onClick:(e,els)=>{ if(els.length>0) filterBySport(d.cal_labels[els[0].index]); }}});
 
   // ── HEATMAP ───────────────────────────────────────────────────
-  const grid = document.getElementById('heatmapGrid');
-  const weeksPerCol = 7;
-  const cols = Math.ceil(d.heatmap.length / weeksPerCol);
-  for (let c = 0; c < cols; c++) {
-    const col = document.createElement('div');
-    col.className = 'hm-col';
-    for (let r = 0; r < weeksPerCol; r++) {
-      const idx = c * weeksPerCol + r;
-      if (idx >= d.heatmap.length) break;
-      const km = d.heatmap[idx];
-      const cell = document.createElement('div');
-      let cls = 'hm-cell';
-      if (km > 20) cls += ' l4';
-      else if (km > 15) cls += ' l3';
-      else if (km > 5)  cls += ' l2';
-      else if (km > 0)  cls += ' l1';
-      cell.className = cls;
-      cell.title = km > 0 ? `${km} km` : 'No run';
-      col.appendChild(cell);
-    }
-    grid.appendChild(col);
-  }
+  const grid=document.getElementById('heatmapGrid');
+  d.heatmap.forEach((km,i)=>{
+    const col=document.createElement('div'); col.className='hm-col';
+    const cell=document.createElement('div');
+    cell.className='hm-cell'+(km>20?' l4':km>15?' l3':km>5?' l2':km>0?' l1':'');
+    cell.title=km>0?`Week ${i+1}: ${km} km`:`Week ${i+1}: no run`;
+    col.appendChild(cell); grid.appendChild(col);
+  });
 
-  // ── PRs ───────────────────────────────────────────────────────
-  const prGrid = document.getElementById('prGrid');
-  ['1K','5K','10K','15K','HM'].forEach(key => {
-    const pr = d.prs[key];
-    if (!pr) return;
-    const names = {'1K':'1 km','5K':'5 km','10K':'10 km','15K':'15 km','HM':'Half Marathon'};
-    prGrid.innerHTML += `
-      <div class="pr-card">
-        <div class="pr-badge">PR</div>
-        <div class="pr-label">${names[key]}</div>
-        <div class="pr-time">${pr.display}</div>
-        <div class="pr-pace">${pr.pace} /km</div>
-        <div class="pr-date">${pr.date} · ${pr.name}</div>
-      </div>`;
+  // ── RUNNING PRs ───────────────────────────────────────────────
+  const prGrid=document.getElementById('prGrid');
+  ['1K','5K','10K','15K','HM','Marathon'].forEach(key=>{
+    const pr=d.prs[key]; if(!pr) return;
+    const names={'1K':'1 km','5K':'5 km','10K':'10 km','15K':'15 km','HM':'Half Marathon','Marathon':'Marathon'};
+    const prClick=pr.id?`onclick="openActModal(${pr.id},'${(pr.name||'').replace(/'/g,"\\'")}','Run')" style="cursor:pointer" title="View this run"`:'';
+    prGrid.innerHTML+=`<div class="pr-card" ${prClick}><div class="pr-badge">PR</div><div class="pr-label">${names[key]}</div><div class="pr-time">${pr.display}</div><div class="pr-pace">${pr.pace} /km</div><div class="pr-date">${pr.date} · ${pr.name}${pr.id?` <span style="font-size:10px;color:#fc4c02">↗</span>`:''}</div></div>`;
   });
 
   // ── PREDICTOR ─────────────────────────────────────────────────
-  const predGrid = document.getElementById('predictorGrid');
-  const predNotes = { '10K':'Based on your 5K PR', 'HM':'Riegel formula', 'Marathon':'Riegel formula' };
-  if (Object.keys(d.predictor).length > 0) {
-    Object.entries(d.predictor).forEach(([dist, time]) => {
-      predGrid.innerHTML += `
-        <div class="pred-card">
-          <div class="pred-dist">${dist}</div>
-          <div class="pred-time">${time}</div>
-          <div class="pred-note">${predNotes[dist] || ''}</div>
-        </div>`;
-    });
-  } else {
-    predGrid.innerHTML = '<p style="color:#bbb;font-size:13px;padding:10px 0">Need more run data for predictions.</p>';
+  const predGrid=document.getElementById('predictorGrid');
+  if(Object.keys(d.predictor).length>0){Object.entries(d.predictor).forEach(([dist,time])=>{predGrid.innerHTML+=`<div class="pred-card"><div class="pred-dist">${dist}</div><div class="pred-time">${time}</div><div class="pred-note">From your 5K PR</div></div>`});}
+  else predGrid.innerHTML='<p style="color:#bbb;font-size:13px">Need a 5K PR to predict times.</p>';
+
+  // ── YEARLY CHARTS (clip future months) ───────────────────────
+  const currentMonth = new Date().getMonth(); // 0-indexed
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const currentYear=new Date().getFullYear().toString();
+  if(d.years&&d.years.length>0){
+    const legend=document.getElementById('yearLegend');
+    legend.innerHTML=d.years.map((yr,i)=>`<div class="year-dot"><div class="year-dot-circle" style="background:${YEAR_COLORS[i%YEAR_COLORS.length]}"></div>${yr}</div>`).join('');
+
+    // Clip current year data after current month
+    const clipData=(yr,data)=> yr===currentYear ? data.map((v,i)=>i<=currentMonth?v:null) : data;
+
+    new Chart(document.getElementById('yearlyChart'),{type:'line',data:{labels:months,datasets:d.years.map((yr,i)=>({label:yr,data:clipData(yr,d.yearly_data[yr]),borderColor:YEAR_COLORS[i%YEAR_COLORS.length],backgroundColor:YEAR_COLORS[i%YEAR_COLORS.length]+'15',borderWidth:2.5,pointRadius:4,fill:false,tension:0.4,spanGaps:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.raw??0} km`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+'km'}},x:{grid:{display:false}}}}});
+
+    new Chart(document.getElementById('yearCumChart'),{type:'line',data:{labels:months,datasets:d.years.map((yr,i)=>{
+      const raw=d.yearly_cumulative[yr]||[];
+      const data=clipData(yr,raw);
+      return {label:yr,data,borderColor:YEAR_COLORS[i%YEAR_COLORS.length],backgroundColor:YEAR_COLORS[i%YEAR_COLORS.length]+'10',borderWidth:2.5,pointRadius:3,fill:true,tension:0.4,spanGaps:false};
+    })},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.raw??0} km total`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+'km'}},x:{grid:{display:false}}}}});
   }
 
   // ── MONTHLY ───────────────────────────────────────────────────
-  new Chart(document.getElementById('monthlyChart'), {
-    type:'bar',
-    data:{
-      labels: d.monthly_labels,
-      datasets:[{ data: d.monthly_values, backgroundColor: barColors(d.monthly_values), borderRadius:7, borderSkipped:false }]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => ` ${c.raw} km` } } },
-      scales:{ y:{ grid:{color:'#f5f5f5'}, ticks:{callback: v => v+'km'} }, x:{grid:{display:false}} }
-    }
-  });
+  new Chart(document.getElementById('monthlyChart'),{type:'bar',data:{labels:d.monthly_labels,datasets:[{data:d.monthly_values,backgroundColor:barColors(d.monthly_values),borderRadius:7,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} km`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+'km'}},x:{grid:{display:false},ticks:{maxRotation:45,maxTicksLimit:18,font:{size:10}}}}}});
 
   // ── PACE TREND ────────────────────────────────────────────────
-  if (d.pace_values.length > 0) {
-    new Chart(document.getElementById('paceChart'), {
-      type:'line',
-      data:{
-        labels: d.pace_labels,
-        datasets:[{ data: d.pace_values, borderColor: C.orange, backgroundColor:'rgba(252,76,2,0.07)',
-          borderWidth:2.5, pointRadius:3, pointBackgroundColor: C.orange, fill:true, tension:0.4 }]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => ` ${c.raw} min/km` } } },
-        scales:{
-          y:{ reverse:true, grid:{color:'#f5f5f5'}, ticks:{callback: v => v+' min/km'} },
-          x:{ grid:{display:false}, ticks:{maxRotation:45, maxTicksLimit:8, font:{size:10}} }
-        }
-      }
-    });
-  }
+  if(d.pace_values.length>0) new Chart(document.getElementById('paceChart'),{type:'line',data:{labels:d.pace_labels,datasets:[{data:d.pace_values,borderColor:C.orange,backgroundColor:'rgba(252,76,2,0.07)',borderWidth:2.5,pointRadius:2,fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} min/km`}}},scales:{y:{reverse:true,grid:{color:'#f5f5f5'},ticks:{callback:v=>v+' min/km'}},x:{grid:{display:false},ticks:{maxRotation:45,maxTicksLimit:8,font:{size:10}}}}}});
 
-  // ── DISTANCE DIST ─────────────────────────────────────────────
-  new Chart(document.getElementById('distChart'), {
-    type:'bar',
-    data:{
-      labels: Object.keys(d.dist_buckets),
-      datasets:[{ data: Object.values(d.dist_buckets),
-        backgroundColor:['#ffd0b8','#ffb890','#ff8c42','#fc4c02','#d93900','#a62b00'],
-        borderRadius:6, borderSkipped:false }]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => ` ${c.raw} runs` } } },
-      scales:{ y:{grid:{color:'#f5f5f5'}, ticks:{stepSize:1}}, x:{grid:{display:false}} }
+  // ── DIST DIST ─────────────────────────────────────────────────
+  new Chart(document.getElementById('distChart'),{type:'bar',data:{labels:Object.keys(d.dist_buckets),datasets:[{data:Object.values(d.dist_buckets),backgroundColor:['#ffd0b8','#ffb890','#ff8c42','#fc4c02','#d93900','#a62b00'],borderRadius:6,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} runs`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{stepSize:1}},x:{grid:{display:false}}}}});
+
+  // ── CYCLING TAB ───────────────────────────────────────────────
+  const nRides=d.total_rides||0;
+  document.getElementById('cyRides').textContent=nRides;
+  document.getElementById('cyKm').textContent=(d.total_ride_km||0)+' km';
+  const longestRide=d.ride_prs&&d.ride_prs['100K']?'100+ km':d.ride_prs&&d.ride_prs['50K']?'50+ km':d.ride_prs&&d.ride_prs['20K']?'20+ km':'—';
+  document.getElementById('cyLongest').textContent=longestRide;
+
+  if(nRides===0){ document.getElementById('noCyclingMsg').style.display='block'; ['cyclingCards','ridePrGrid'].forEach(id=>document.getElementById(id).style.display='none'); }
+  else {
+    // Ride PRs
+    const ridePrGrid=document.getElementById('ridePrGrid');
+    Object.entries(d.ride_prs||{}).forEach(([dist,pr])=>{
+      const rPrClick=pr.id?`onclick="openActModal(${pr.id},'${(pr.name||'').replace(/'/g,"\\'")}','Ride')" style="cursor:pointer" title="View this ride"`:'';
+      ridePrGrid.innerHTML+=`<div class="pr-card" ${rPrClick}><div class="pr-badge">PR</div><div class="pr-label">${dist} ride</div><div class="pr-time">${pr.display}</div><div class="pr-pace">${pr.speed} km/h avg</div><div class="pr-date">${pr.date} · ${pr.name}${pr.id?` <span style="font-size:10px;color:#fc4c02">↗</span>`:''}</div></div>`;
+    });
+    // Ride yearly
+    if(d.ride_years&&d.ride_years.length>0){
+      const rLeg=document.getElementById('rideYearLegend');
+      rLeg.innerHTML=d.ride_years.map((yr,i)=>`<div class="year-dot"><div class="year-dot-circle" style="background:${YEAR_COLORS[i%YEAR_COLORS.length]}"></div>${yr}</div>`).join('');
+      const clipR=(yr,data)=>yr===currentYear?data.map((v,i)=>i<=currentMonth?v:null):data;
+      new Chart(document.getElementById('rideYearlyChart'),{type:'line',data:{labels:months,datasets:d.ride_years.map((yr,i)=>({label:yr,data:clipR(yr,d.ride_yearly_data[yr]||[]),borderColor:YEAR_COLORS[i%YEAR_COLORS.length],backgroundColor:YEAR_COLORS[i%YEAR_COLORS.length]+'15',borderWidth:2.5,pointRadius:4,fill:false,tension:0.4,spanGaps:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+'km'}},x:{grid:{display:false}}}}});
     }
-  });
-
-  // ── WEEKLY LOAD ───────────────────────────────────────────────
-  if (d.week_values.length > 0) {
-    new Chart(document.getElementById('weeklyChart'), {
-      type:'bar',
-      data:{
-        labels: d.week_labels,
-        datasets:[{ data: d.week_values, backgroundColor: barColors(d.week_values), borderRadius:6, borderSkipped:false }]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => ` Effort: ${c.raw}` } } },
-        scales:{ y:{grid:{color:'#f5f5f5'}}, x:{grid:{display:false}, ticks:{maxRotation:45, font:{size:10}}} }
-      }
-    });
+    // Ride monthly
+    if(d.ride_monthly_labels&&d.ride_monthly_labels.length>0){
+      new Chart(document.getElementById('rideMonthlyChart'),{type:'bar',data:{labels:d.ride_monthly_labels,datasets:[{data:d.ride_monthly_values,backgroundColor:barColors(d.ride_monthly_values,'#9b5de5','#c79ef0','#e8d5ff'),borderRadius:6,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} km`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+'km'}},x:{grid:{display:false},ticks:{maxRotation:45,maxTicksLimit:18,font:{size:10}}}}}});
+    }
+    // Speed trend
+    if(d.ride_speed_values&&d.ride_speed_values.length>0) new Chart(document.getElementById('rideSpeedChart'),{type:'line',data:{labels:d.ride_speed_labels,datasets:[{data:d.ride_speed_values,borderColor:C.purple,backgroundColor:'rgba(155,93,229,0.07)',borderWidth:2.5,pointRadius:2,fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} km/h`}}},scales:{y:{grid:{color:'#f5f5f5'},ticks:{callback:v=>v+' km/h'}},x:{grid:{display:false},ticks:{maxRotation:45,maxTicksLimit:8,font:{size:10}}}}}});
   }
 
-  // ── SWEET SPOT ────────────────────────────────────────────────
-  if (d.sweet_labels && d.sweet_labels.length > 0) {
-    const sweetColors = d.sweet_labels.map(l => l === d.sweet_spot ? C.orange : C.orange3);
-    new Chart(document.getElementById('sweetChart'), {
-      type:'bar',
-      data:{
-        labels: d.sweet_labels,
-        datasets:[{ data: d.sweet_values, backgroundColor: sweetColors, borderRadius:8, borderSkipped:false }]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false}, tooltip:{ callbacks:{
-          label: c => ` ${c.raw} min/km avg (${d.sweet_counts[c.dataIndex]} runs)`
-        }}},
-        scales:{
-          y:{ reverse:true, grid:{color:'#f5f5f5'}, ticks:{callback: v => v+' min/km'},
-              title:{display:true, text:'← faster', color:'#06d6a0', font:{size:11}} },
-          x:{grid:{display:false}}
-        }
-      }
-    });
-    if (d.sweet_spot) {
-      const badge = document.getElementById('sweetBadge');
-      badge.style.display = 'inline-block';
-      badge.textContent = 'Sweet spot: ' + d.sweet_spot.replace('\n',' ');
+  // ── SWIMMING TAB ──────────────────────────────────────────────
+  const nSwims = d.total_swims || 0;
+  document.getElementById('swTotalSwims').textContent = nSwims;
+  if (nSwims === 0) {
+    document.getElementById('noSwimmingMsg').style.display = 'block';
+    document.getElementById('swimCards').style.display = 'none';
+  } else {
+    const totalSwimKm = (d.swim_monthly_values||[]).reduce((a,b)=>a+b, 0);
+    document.getElementById('swTotalKm').textContent = round1(totalSwimKm) + ' km';
+    // Longest swim from monthly data — approximate; show total
+    document.getElementById('swLongest').textContent = '—';
+    document.getElementById('swAvg').textContent = nSwims > 0 ? Math.round(totalSwimKm * 1000 / nSwims) + ' m' : '—';
+    if (d.swim_monthly_labels && d.swim_monthly_labels.length > 0) {
+      // Swimming distances are in km from backend — convert to metres for display
+      const swimValsM = (d.swim_monthly_values||[]).map(v => Math.round(v * 1000));
+      const sM = d.swim_monthly_labels.length, sW = Math.max(400, sM * 36);
+      const sC = document.getElementById('swimMonthlyChart'); sC.style.width = sW+'px'; sC.style.minWidth = sW+'px';
+      new Chart(sC, {type:'bar', data:{labels:d.swim_monthly_labels, datasets:[{data:swimValsM, backgroundColor:barColors(swimValsM,'#00b4d8','#48cae4','#ade8f4'), borderRadius:6, borderSkipped:false}]}, options:{responsive:false, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.raw} m`}}}, scales:{y:{grid:{color:'#f5f5f5'}, ticks:{callback:v=>v+'m'}}, x:{grid:{display:false}, ticks:{maxRotation:45, font:{size:10}}}}}});
     }
   }
 
-  // ── TIME OF DAY ───────────────────────────────────────────────
-  if (d.tod_values.length > 0) {
-    const minPace = Math.min(...d.tod_values);
-    const bestIdx = d.tod_values.indexOf(minPace);
-    const todCard = document.getElementById('todBestCard');
-    todCard.style.display = 'block';
-    document.getElementById('todBestLabel').textContent = d.tod_labels[bestIdx].replace('\n',' ');
-    document.getElementById('todBestSub').textContent   = `Avg pace: ${minPace} min/km`;
+  // ── TRAINING CHARTS ───────────────────────────────────────────
+  if(d.week_values.length>0) new Chart(document.getElementById('weeklyChart'),{type:'bar',data:{labels:d.week_labels,datasets:[{data:d.week_values,backgroundColor:barColors(d.week_values),borderRadius:6,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'#f5f5f5'}},x:{grid:{display:false},ticks:{maxRotation:45,font:{size:10}}}}}});
 
-    new Chart(document.getElementById('todChart'), {
-      type:'bar',
-      data:{
-        labels: d.tod_labels.map(l => l.replace('\n',' ')),
-        datasets:[{ data: d.tod_values,
-          backgroundColor: d.tod_values.map((v,i) => i === bestIdx ? C.orange : C.orange3),
-          borderRadius:8, borderSkipped:false }]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => ` ${c.raw} min/km avg` } } },
-        scales:{
-          y:{ reverse:true, grid:{color:'#f5f5f5'}, ticks:{callback: v => v+' min/km'} },
-          x:{grid:{display:false}}
-        }
-      }
-    });
+  if(d.sweet_labels&&d.sweet_labels.length>0){
+    const SCOLS=['#3a86ff','#06d6a0','#fc4c02','#e63946'];
+    new Chart(document.getElementById('sweetChart'),{type:'bar',data:{labels:d.sweet_labels,datasets:[{data:d.sweet_values,backgroundColor:d.sweet_labels.map((l,i)=>l===d.sweet_spot?C.orange:SCOLS[i%SCOLS.length]),borderRadius:8,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} min/km avg (${d.sweet_counts[c.dataIndex]} runs)`}}},scales:{y:{reverse:true,grid:{color:'#f5f5f5'},ticks:{callback:v=>v+' min/km'},title:{display:true,text:'← faster',color:'#06d6a0',font:{size:11}}},x:{grid:{display:false}}}}});
+    if(d.sweet_spot){ const b=document.getElementById('sweetBadge'); b.style.display='inline-block'; b.textContent='Sweet spot: '+d.sweet_spot.replace('\n',' '); }
   }
 
-  // ── FITNESS AGE ───────────────────────────────────────────────
-  renderFitnessAge(d.fitness_age);
+  if(d.tod_values.length>0){
+    const minIdx=d.tod_values.indexOf(Math.min(...d.tod_values));
+    document.getElementById('todBestCard').style.display='block';
+    document.getElementById('todBestLabel').textContent=d.tod_labels[minIdx].replace('\n',' ');
+    document.getElementById('todBestSub').textContent=`Avg pace: ${d.tod_values[minIdx]} min/km`;
+    new Chart(document.getElementById('todChart'),{type:'bar',data:{labels:d.tod_labels.map(l=>l.replace('\n',' ')),datasets:[{data:d.tod_values,backgroundColor:d.tod_values.map((v,i)=>i===minIdx?C.orange:C.orange3),borderRadius:8,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{reverse:true,grid:{color:'#f5f5f5'},ticks:{callback:v=>v+' min/km'}},x:{grid:{display:false}}}}});
+  }
+
+  // ── INSIGHTS, STATS, ACHIEVEMENTS ─────────────────────────────
+  renderPerfInsights(d);
+  if(d.stats) renderStats(d.stats);
+  if(d.achievements) renderAchievements(d.achievements);
 }
 </script>
 </body>
