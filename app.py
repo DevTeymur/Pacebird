@@ -31,9 +31,14 @@ from core.fitness import (
 from core.card import FONT_BOLD, FONT_REGULAR, FONT_BLACK, generate_card
 from core.stats import compute_streaks, compute_stats
 from core.achievements import compute_achievements
+from core.db import init_db, upsert_token, delete_token
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "change-this-to-random-string")
+
+# Initialise DB on startup (creates tokens table if not exists)
+with app.app_context():
+    init_db()
 
 CLIENT_ID     = os.environ.get("STRAVA_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET")
@@ -160,15 +165,30 @@ def callback():
         return f"Login error: {e}", 500
     if "access_token" not in data:
         return f"Token error: {data}", 400
+    athlete = data.get("athlete", {})
+    athlete_id = athlete.get("id")
     session.clear()
     session["access_token"]  = data["access_token"]
     session["refresh_token"] = data["refresh_token"]
-    session["athlete"]       = data.get("athlete", {})
+    session["expires_at"]    = data.get("expires_at", 0)
+    session["athlete"]       = athlete
+    # Persist tokens to DB for automatic refresh across sessions
+    if athlete_id:
+        upsert_token(
+            athlete_id    = athlete_id,
+            access_token  = data["access_token"],
+            refresh_token = data["refresh_token"],
+            expires_at    = data.get("expires_at", 0),
+            athlete_obj   = athlete,
+        )
     return redirect("/dashboard")
 
 
 @app.route("/logout")
 def logout():
+    athlete_id = session.get("athlete", {}).get("id")
+    if athlete_id:
+        delete_token(athlete_id)
     session.clear()
     return redirect("/")
 

@@ -4,6 +4,9 @@
 # Strava activity cache (contains personal data)
 .cache/
 
+# SQLite token database (contains OAuth tokens — never commit)
+pacebird.db
+
 # Python
 __pycache__/
 *.py[cod]

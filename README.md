@@ -12,7 +12,7 @@ Pacebird is a personal stats dashboard that connects to your Strava account and 
 - **Running** — personal records (1K → Marathon), race predictor, yearly distance charts, pace trend
 - **Cycling** — ride PRs, monthly distance, average speed progression
 - **Swimming** — monthly distance, session stats
-- **Training** — weekly load, training sweet spot, best time of day
+- **Training** — weekly load, training sweet spot, best time of day, personalised recommendations
 - **Insights** — performance highlights, weather vs pace analysis
 - **Stats** — full breakdown: distance, time, elevation, streaks
 - **Achievements** — unlockable badges across Running, Cycling, Swimming, Streaks
@@ -25,11 +25,13 @@ Pacebird is a personal stats dashboard that connects to your Strava account and 
 
 - **Backend**: Python 3, Flask
 - **Strava API**: OAuth 2.0, read-only (`activity:read_all`)
+- **Token storage**: SQLite (`pacebird.db`) — one row per athlete, tokens auto-refresh every 6 hours
 - **Charts**: Chart.js 4.4.1
 - **Maps**: Leaflet.js + OpenStreetMap
 - **Weather**: Open-Meteo (free, no API key needed)
 - **Image card**: Pillow
-- **Data cache**: JSON files on disk (per athlete)
+- **Activity cache**: JSON files on disk per athlete (`.cache/activities_<id>.json`)
+- **Incremental sync**: on Refresh, only fetches activities newer than the last cached date — typically 1 API call instead of 7–10
 
 ---
 
@@ -95,18 +97,31 @@ Loads ~700 synthetic activities so you can explore all features without connecti
 
 ```
 pacebird/
-├── app.py              # Flask backend, all routes and data processing
-├── demo_data.py        # Synthetic activity generator for demo mode
-├── requirements.txt    # Python dependencies
-├── run.sh              # One-command startup script
-├── .env.example        # Environment variable template
-├── .env                # Your secrets — never commit this
+├── app.py                  # Flask app — routes only
+├── demo_data.py            # Synthetic activity generator for demo mode
+├── requirements.txt        # Python dependencies
+├── run.sh                  # One-command startup script
+├── .env.example            # Environment variable template
+├── .env                    # Your secrets — never commit this
 ├── .gitignore
+├── core/                   # Business logic package
+│   ├── cache.py            # Disk cache (activities + enrichment per athlete)
+│   ├── strava.py           # Strava API fetch, incremental sync, token refresh
+│   ├── db.py               # SQLite token store for multi-user support
+│   ├── helpers.py          # Utility functions (pace, time formatting)
+│   ├── fitness.py          # VO2max + fitness age calculations
+│   ├── stats.py            # compute_stats, compute_streaks, training recs
+│   ├── achievements.py     # compute_achievements
+│   └── card.py             # Share card image generator (Pillow)
 ├── templates/
-│   ├── login.html      # Connect with Strava page
-│   └── dashboard.html  # Main app UI (single-page, all tabs)
-├── static/             # Static assets
-├── .cache/             # Per-athlete activity cache — never commit this
+│   ├── login.html          # Connect with Strava page
+│   ├── dashboard.html      # Main app UI (single-page, all tabs)
+│   ├── 404.html            # Not found page
+│   └── 500.html            # Server error page
+├── static/
+│   └── manifest.json       # PWA manifest (Add to Home Screen)
+├── pacebird.db             # SQLite token DB — never commit this
+├── .cache/                 # Per-athlete activity cache — never commit this
 ├── README.md
 ├── CHANGELOG.md
 ├── SECURITY.md
@@ -123,9 +138,13 @@ pacebird/
 
 ---
 
+## Multi-user Support
+
+Multiple people can use the same Pacebird instance — each user gets their own isolated Flask session (cookie-based), their own activity cache file, and their own token row in `pacebird.db`. Tokens auto-refresh before every API call so sessions never break after 6 hours.
+
 ## Rate Limits
 
-Strava allows 200 requests per 15 minutes, 2,000 per day. Pacebird fetches your full history once and caches it permanently — typically 7–10 API calls for 1,000+ activities. After that, all page loads use the local cache. Hit **Refresh** in the app only when you want to pull new activities.
+Strava allows 200 requests per 15 minutes, 2,000 per day. Pacebird fetches your full history once and caches it permanently — typically 7–10 API calls for 1,000+ activities. After that, all page loads use the local cache. Hit **Refresh** to pull only the activities since your last sync — usually just 1 API call.
 
 ---
 
