@@ -120,8 +120,9 @@ pacebird/
 │   └── 500.html            # Server error page
 ├── static/
 │   └── manifest.json       # PWA manifest (Add to Home Screen)
-├── pacebird.db             # SQLite token DB — never commit this
-├── .cache/                 # Per-athlete activity cache — never commit this
+├── data/                   # Runtime data — auto-created, never commit
+│   ├── pacebird.db         # SQLite token store (OAuth tokens per athlete)
+│   └── cache/              # Per-athlete activity + enrichment JSON files
 ├── README.md
 ├── CHANGELOG.md
 ├── SECURITY.md

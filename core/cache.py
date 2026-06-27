@@ -2,7 +2,7 @@ import os
 import json
 import time
 
-CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", ".cache")
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "cache")
 
 def _cache_path(athlete_id):
     return os.path.join(CACHE_DIR, f"activities_{athlete_id}.json")

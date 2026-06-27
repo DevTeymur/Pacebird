@@ -19,7 +19,7 @@ import os
 import json
 import sqlite3
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "pacebird.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "pacebird.db")
 
 
 def _conn():
@@ -30,6 +30,7 @@ def _conn():
 
 def init_db():
     """Create the tokens table if it doesn't exist. Call once at startup."""
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with _conn() as con:
         con.execute("""
             CREATE TABLE IF NOT EXISTS tokens (

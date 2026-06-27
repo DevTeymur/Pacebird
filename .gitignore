@@ -1,11 +1,8 @@
 # Environment
 .env
 
-# Strava activity cache (contains personal data)
-.cache/
-
-# SQLite token database (contains OAuth tokens — never commit)
-pacebird.db
+# Runtime data — personal data and OAuth tokens, never commit
+data/
 
 # Python
 __pycache__/
