@@ -1,8 +1,8 @@
 # Environment
 .env
 
-# Strava activity cache (contains personal data)
-.cache/
+# Runtime data — personal data and OAuth tokens, never commit
+data/
 
 # Python
 __pycache__/
