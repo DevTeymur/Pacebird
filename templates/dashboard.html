@@ -284,6 +284,23 @@ tbody td { padding:11px 14px; vertical-align:middle; }
 .tbl-page-btn:hover:not(:disabled) { border-color:#fc4c02; color:#fc4c02; }
 .tbl-page-btn:disabled { opacity:0.4; cursor:default; }
 
+/* ── TRAINING RECOMMENDATIONS ── */
+.rec-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-bottom:8px; }
+.rec-card {
+  background:#fff; border-radius:14px; padding:18px 18px 16px;
+  border:1px solid #efefef; border-left:4px solid #e0e0e0;
+  display:flex; flex-direction:column; gap:6px;
+  transition:box-shadow .2s;
+}
+.rec-card:hover { box-shadow:0 4px 18px rgba(0,0,0,0.07); }
+.rec-card.warn  { border-left-color:#fc4c02; background:#fffaf8; }
+.rec-card.good  { border-left-color:#06d6a0; background:#f0fefa; }
+.rec-card.tip   { border-left-color:#3a86ff; background:#f0f5ff; }
+.rec-icon  { font-size:20px; line-height:1; }
+.rec-title { font-size:13px; font-weight:800; color:#1a1a2e; }
+.rec-body  { font-size:12px; color:#666; line-height:1.55; }
+.rec-empty { font-size:13px; color:#bbb; padding:16px 0; }
+
 /* ── ENRICHMENT ── */
 .enrich-bar-wrap { background:#fff; border:1px solid #efefef; border-radius:12px; padding:14px 18px; margin-bottom:16px; display:flex; align-items:center; gap:14px; }
 .enrich-bar-track { flex:1; height:6px; background:#f0f0f0; border-radius:4px; overflow:hidden; }
@@ -424,6 +441,9 @@ tbody td { padding:11px 14px; vertical-align:middle; }
   .stat-hero-item .value { font-size: 20px; }
   .stats-grid { grid-template-columns: 1fr; gap: 8px; }
   .stat-row { padding: 12px 14px; }
+
+  /* ── RECOMMENDATIONS ── */
+  .rec-grid { grid-template-columns: 1fr; gap: 10px; }
 
   /* ── ACHIEVEMENTS ── */
   .ach-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -774,6 +794,11 @@ tbody td { padding:11px 14px; vertical-align:middle; }
 <!-- ══ TRAINING ══ -->
 <div class="tab-panel" id="tab-training">
   <div class="container">
+    <div class="section-title">Recommendations</div>
+    <div class="rec-grid" id="recGrid">
+      <div class="rec-empty">Loading…</div>
+    </div>
+
     <div class="section-title">Weekly Load</div>
     <div class="chart-card">
       <div class="chart-title">Combined Training Load — Last 12 Weeks</div>
@@ -1600,6 +1625,23 @@ function render(d) {
       new Chart(sC, {type:'bar', data:{labels:d.swim_monthly_labels, datasets:[{data:swimValsM, backgroundColor:barColors(swimValsM,'#00b4d8','#48cae4','#ade8f4'), borderRadius:6, borderSkipped:false}]}, options:{responsive:false, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.raw} m`}}}, scales:{y:{grid:{color:'#f5f5f5'}, ticks:{callback:v=>v+'m'}}, x:{grid:{display:false}, ticks:{maxRotation:45, font:{size:10}}}}}});
     }
   }
+
+  // ── TRAINING RECOMMENDATIONS ──────────────────────────────────
+  (function(){
+    const grid = document.getElementById('recGrid');
+    if(!grid) return;
+    const recs = d.training_recs || [];
+    if(!recs.length){
+      grid.innerHTML = '<div class="rec-empty">Not enough data yet for recommendations. Keep training!</div>';
+      return;
+    }
+    grid.innerHTML = recs.map(r => `
+      <div class="rec-card ${r.type}">
+        <div class="rec-icon">${r.icon}</div>
+        <div class="rec-title">${r.title}</div>
+        <div class="rec-body">${r.body}</div>
+      </div>`).join('');
+  })();
 
   // ── TRAINING CHARTS ───────────────────────────────────────────
   if(d.week_values.length>0) new Chart(document.getElementById('weeklyChart'),{type:'bar',data:{labels:d.week_labels,datasets:[{data:d.week_values,backgroundColor:barColors(d.week_values),borderRadius:6,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'#f5f5f5'}},x:{grid:{display:false},ticks:{maxRotation:45,font:{size:10}}}}}});

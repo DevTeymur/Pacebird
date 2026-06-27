@@ -895,6 +895,320 @@ def compute_stats(activities):
     # ── MOST ACTIVE SPORT ────────────────────────────────────────
     most_active_sport = top_sports[0][0] if top_sports else None
 
+    # ── TRAINING RECOMMENDATIONS ─────────────────────────────────
+    # Pure rule engine — every card is derived from this athlete's
+    # own numbers. Nothing is hardcoded per-user.
+    # Card shape: {icon, title, body, type}  type: "warn"|"tip"|"good"
+    training_recs = []
+
+    # Shared date anchors used across multiple rules
+    four_weeks_ago  = now - timedelta(weeks=4)
+    eight_weeks_ago = now - timedelta(weeks=8)
+    two_weeks_ago   = now - timedelta(weeks=2)
+    twelve_wks_ago  = now - timedelta(weeks=12)
+
+    def run_dt(a):
+        try: return datetime.strptime(a["start_date_local"][:10], "%Y-%m-%d")
+        except Exception: return None
+
+    if runs:
+        # ── A. LOAD RAMP (week-over-week) ────────────────────────
+        if len(week_values) >= 4:
+            avg4    = sum(week_values[-4:]) / 4
+            last_wk = week_values[-1]
+            last3   = week_values[-3:]
+            is_dropping = all(last3[i] > last3[i+1] for i in range(len(last3)-1))
+
+            if avg4 > 0 and last_wk > avg4 * 1.3:
+                pct = round((last_wk / avg4 - 1) * 100)
+                training_recs.append({
+                    "icon": "⚠️",
+                    "title": "Load spike this week",
+                    "body": f"Training load is {pct}% above your 4-week average. One easy or rest day tomorrow will let your body absorb the work rather than just accumulate fatigue.",
+                    "type": "warn",
+                })
+            elif is_dropping and last_wk < avg4 * 0.6:
+                training_recs.append({
+                    "icon": "📉",
+                    "title": "3 weeks of declining load",
+                    "body": "Your training has been getting lighter each week. Unless you're in a planned recovery block, a gradual build will keep your fitness from drifting backwards.",
+                    "type": "tip",
+                })
+            elif avg4 > 0 and last_wk < avg4 * 0.4:
+                training_recs.append({
+                    "icon": "💤",
+                    "title": "Very light week compared to normal",
+                    "body": f"This week's load is well below your usual average. A single moderate run can be enough to keep your aerobic system engaged without adding fatigue.",
+                    "type": "tip",
+                })
+
+        # ── B. LONG RUN RECENCY ───────────────────────────────────
+        all_long    = [a for a in runs if a.get("distance", 0) >= 14000]
+        recent_long = [a for a in all_long if run_dt(a) and run_dt(a) >= four_weeks_ago]
+
+        if all_long and not recent_long:
+            last_long_dt = run_dt(max(all_long, key=lambda x: x.get("start_date_local", "")))
+            days_since = (now - last_long_dt).days if last_long_dt else 0
+            training_recs.append({
+                "icon": "🛣️",
+                "title": f"No long run in {days_since} days",
+                "body": "Long runs (14 km+) are the single best driver of aerobic base. They teach your body to burn fat, strengthen tendons, and make shorter runs feel easier. Aim for one every 10–14 days.",
+                "type": "tip",
+            })
+        elif recent_long:
+            # They're doing long runs consistently — reinforce it
+            longest_recent = max(a.get("distance", 0) for a in recent_long) / 1000
+            training_recs.append({
+                "icon": "🛣️",
+                "title": f"Long runs are consistent",
+                "body": f"You've done at least one run over {longest_recent:.0f} km in the last 4 weeks. Long runs are the bedrock of endurance — keep scheduling them.",
+                "type": "good",
+            })
+
+        # ── C. RUN FREQUENCY & CONSISTENCY ───────────────────────
+        if len(runs) >= 8:
+            runs_last4 = [a for a in runs if run_dt(a) and run_dt(a) >= four_weeks_ago]
+            runs_prev4 = [a for a in runs if run_dt(a) and eight_weeks_ago <= run_dt(a) < four_weeks_ago]
+            avg_last4  = len(runs_last4) / 4
+            avg_prev4  = len(runs_prev4) / 4 if runs_prev4 else avg_last4
+
+            if avg_last4 >= 4:
+                training_recs.append({
+                    "icon": "🔥",
+                    "title": f"High consistency — {avg_last4:.1f} runs/week",
+                    "body": "Running 4+ times a week is where real adaptation happens. Make sure at least one of those is easy-paced to keep recovery balanced.",
+                    "type": "good",
+                })
+            elif avg_last4 >= 3:
+                training_recs.append({
+                    "icon": "✅",
+                    "title": f"Good frequency — {avg_last4:.1f} runs/week",
+                    "body": "Three runs a week is a solid base. Adding a fourth — even a short 20-minute easy run — can noticeably accelerate progress over time.",
+                    "type": "good",
+                })
+            elif avg_prev4 > 0 and avg_last4 < avg_prev4 * 0.6:
+                training_recs.append({
+                    "icon": "📅",
+                    "title": "Fewer runs than usual",
+                    "body": f"You averaged {avg_prev4:.1f} runs/week before but only {avg_last4:.1f} in the last 4 weeks. Consistency is the biggest predictor of improvement — even one extra short run helps.",
+                    "type": "tip",
+                })
+            elif avg_last4 < 2:
+                training_recs.append({
+                    "icon": "📅",
+                    "title": "Running less than twice a week",
+                    "body": "With fewer than 2 runs a week, it's hard to build fitness — each run is mostly just recovering to where you were. Aim for at least 3 to see real progress.",
+                    "type": "tip",
+                })
+
+        # ── D. RUN VARIETY (short vs long balance) ────────────────
+        if len(runs) >= 10:
+            recent_runs = [a for a in runs if run_dt(a) and run_dt(a) >= eight_weeks_ago]
+            if recent_runs:
+                short = [a for a in recent_runs if a.get("distance", 0) < 5000]
+                total = len(recent_runs)
+                short_pct = len(short) / total
+                if short_pct > 0.7:
+                    training_recs.append({
+                        "icon": "📏",
+                        "title": "Most runs are under 5 km",
+                        "body": f"{round(short_pct*100)}% of your recent runs are shorter than 5 km. Adding a medium run (8–12 km) each week builds the aerobic range that makes all your shorter runs faster.",
+                        "type": "tip",
+                    })
+                elif short_pct < 0.2 and total >= 6:
+                    training_recs.append({
+                        "icon": "⚡",
+                        "title": "Very few short/fast runs",
+                        "body": "Most of your runs are long. Adding a shorter, faster session (5–7 km at a harder effort) once a week builds speed and keeps your fast-twitch fibres engaged.",
+                        "type": "tip",
+                    })
+
+        # ── E. SWEET SPOT ZONE ────────────────────────────────────
+        if sweet_spot_label and week_values:
+            last_load = week_values[-1]
+            spot_map  = {
+                "Low\n(0–30)": 15, "Medium\n(30–80)": 55,
+                "High\n(80–150)": 115, "Very High\n(150+)": 180,
+            }
+            spot_mid   = spot_map.get(sweet_spot_label, 55)
+            spot_clean = sweet_spot_label.replace("\n", " ")
+            if last_load < spot_mid * 0.6:
+                training_recs.append({
+                    "icon": "🎯",
+                    "title": f"Below your sweet spot ({spot_clean})",
+                    "body": f"Your data shows you run fastest after {spot_clean} load weeks. This week was lighter — a moderate effort this week could sharpen your next run.",
+                    "type": "tip",
+                })
+            elif last_load > spot_mid * 1.6:
+                training_recs.append({
+                    "icon": "🎯",
+                    "title": f"Above your sweet spot ({spot_clean})",
+                    "body": f"You tend to run fastest after {spot_clean} load weeks. You're currently above that — a lighter week might actually produce a faster run than pushing harder.",
+                    "type": "warn",
+                })
+            else:
+                training_recs.append({
+                    "icon": "🎯",
+                    "title": f"In your sweet spot ({spot_clean})",
+                    "body": f"Your recent load is right in the zone where your pace data shows your best performances. This is exactly the balance to maintain.",
+                    "type": "good",
+                })
+
+        # ── F. PACE TREND ─────────────────────────────────────────
+        if pace_improvement is not None:
+            if pace_improvement > 0.3:
+                training_recs.append({
+                    "icon": "📈",
+                    "title": f"Strong pace progress — {pace_improvement:.2f} min/km faster",
+                    "body": "Your recent runs are significantly faster than your earlier ones. Whatever structure you've built is working. Protect it — avoid big load spikes that could cause injury.",
+                    "type": "good",
+                })
+            elif pace_improvement > 0.05:
+                training_recs.append({
+                    "icon": "📈",
+                    "title": f"Pace improving — {pace_improvement:.2f} min/km gained",
+                    "body": "You're trending in the right direction. Small, consistent improvements add up — a 0.1 min/km gain over a year is a major transformation.",
+                    "type": "good",
+                })
+            elif pace_improvement < -0.2:
+                training_recs.append({
+                    "icon": "🔄",
+                    "title": "Pace has slowed recently",
+                    "body": "Your recent average pace is slower than your earlier runs. Common causes: more long/easy runs, accumulated fatigue, or less speedwork. Check if your easy runs are actually easy.",
+                    "type": "tip",
+                })
+
+        # ── G. REST & RECOVERY ────────────────────────────────────
+        last_7_dates = set()
+        for a in activities:
+            d = a.get("start_date_local", "")[:10]
+            if d:
+                try:
+                    if (now - datetime.strptime(d, "%Y-%m-%d")).days < 7:
+                        last_7_dates.add(d)
+                except Exception:
+                    pass
+
+        if len(last_7_dates) >= 7:
+            training_recs.append({
+                "icon": "🚨",
+                "title": "Active every single day this week",
+                "body": "Training every day without rest is a reliable path to overuse injury. Even one complete rest day per week dramatically reduces injury risk and improves performance.",
+                "type": "warn",
+            })
+        elif len(last_7_dates) >= 6:
+            training_recs.append({
+                "icon": "😴",
+                "title": "Only one rest day this week",
+                "body": "You've been active 6 out of 7 days. Muscles rebuild during rest, not during exercise. Try to protect at least 1–2 full rest days each week.",
+                "type": "warn",
+            })
+
+        # ── H. RECENT INACTIVITY ──────────────────────────────────
+        if activities:
+            last_act_dt = run_dt(max(activities, key=lambda x: x.get("start_date_local", "")))
+            if last_act_dt:
+                days_inactive = (now - last_act_dt).days
+                if days_inactive >= 14:
+                    training_recs.append({
+                        "icon": "🏃",
+                        "title": f"No activity in {days_inactive} days",
+                        "body": "After 2+ weeks off, aerobic fitness starts to decline measurably. A short easy run — even 20 minutes — is enough to restart the engine. Start easy and build back gradually.",
+                        "type": "warn",
+                    })
+                elif days_inactive >= 7:
+                    training_recs.append({
+                        "icon": "🏃",
+                        "title": f"{days_inactive} days since your last activity",
+                        "body": "A week without training won't lose you fitness, but two weeks will. Now is a good time to get a run in.",
+                        "type": "tip",
+                    })
+
+        # ── I. STREAK MOMENTUM ────────────────────────────────────
+        if cur_streak >= 14:
+            training_recs.append({
+                "icon": "🔥",
+                "title": f"{cur_streak}-day activity streak",
+                "body": "An impressive streak — but make sure some of those days include genuine rest-level effort (walking counts). Streaks built on daily hard efforts tend to end in injury.",
+                "type": "good",
+            })
+        elif cur_streak >= 7:
+            training_recs.append({
+                "icon": "⚡",
+                "title": f"{cur_streak} days in a row",
+                "body": "Good momentum. Keep going but listen to your body — if something feels off, a rest day won't break the progress you've built.",
+                "type": "good",
+            })
+
+        # ── J. BEST TIME OF DAY ───────────────────────────────────
+        if tod_values and len(tod_labels) >= 2:
+            best_idx  = tod_values.index(min(tod_values))
+            worst_idx = tod_values.index(max(tod_values))
+            pace_diff = round(tod_values[worst_idx] - tod_values[best_idx], 2)
+            best_slot  = tod_labels[best_idx].replace("\n", " ")
+            worst_slot = tod_labels[worst_idx].replace("\n", " ")
+            if pace_diff >= 0.15:
+                training_recs.append({
+                    "icon": "⏰",
+                    "title": f"{best_slot} is your fastest window",
+                    "body": f"Your {best_slot} pace is {pace_diff:.2f} min/km faster than your {worst_slot} average across all your runs. Schedule hard sessions and races in the {best_slot} when possible.",
+                    "type": "tip",
+                })
+
+        # ── K. BEST DAY OF WEEK ───────────────────────────────────
+        if best_dow and dow_values and len(dow_values) >= 3:
+            worst_dow_val = max(dow_values)
+            best_dow_val  = min(dow_values)
+            diff = round(worst_dow_val - best_dow_val, 2)
+            worst_dow_idx = dow_values.index(worst_dow_val)
+            worst_dow_label = dow_labels[worst_dow_idx] if worst_dow_idx < len(dow_labels) else ""
+            if diff >= 0.2:
+                training_recs.append({
+                    "icon": "📆",
+                    "title": f"{best_dow} is your best running day",
+                    "body": f"Your average pace on {best_dow} is {diff:.2f} min/km faster than on {worst_dow_label}. Plan your key workout or long run on {best_dow} when you can.",
+                    "type": "tip",
+                })
+
+        # ── L. CROSS-TRAINING MIX ─────────────────────────────────
+        gym_last4  = [a for a in gym if run_dt(a) and run_dt(a) >= four_weeks_ago]
+        swim_last4 = [a for a in swims if run_dt(a) and run_dt(a) >= four_weeks_ago]
+        runs_last4_ct = [a for a in runs if run_dt(a) and run_dt(a) >= four_weeks_ago]
+
+        if runs_last4_ct and not gym_last4 and not swim_last4:
+            training_recs.append({
+                "icon": "💪",
+                "title": "Only running in the last 4 weeks",
+                "body": "Strength work 1–2× a week reduces injury risk and improves running economy. Even 20 minutes of bodyweight exercises makes a difference over months.",
+                "type": "tip",
+            })
+        elif gym_last4 and runs_last4_ct:
+            gym_per_week = len(gym_last4) / 4
+            if gym_per_week >= 2:
+                training_recs.append({
+                    "icon": "💪",
+                    "title": "Good strength + running balance",
+                    "body": f"You're combining {gym_per_week:.1f} gym sessions/week with your running. Strength training this consistently will pay off in injury prevention and running economy.",
+                    "type": "good",
+                })
+
+    # ── PRIORITY & CAP ────────────────────────────────────────────
+    # warnings first → tips → good news. Cap to produce 3 or 4 cards
+    # (so they always fill a row evenly at the default 3-col grid).
+    def rec_priority(r):
+        return {"warn": 0, "tip": 1, "good": 2}[r["type"]]
+
+    training_recs = sorted(training_recs, key=rec_priority)
+
+    # Pick 3 or 4 — whichever fits the content better.
+    # Prefer 4 if we have enough; otherwise 3. Never 2 or 5 (awkward rows).
+    if len(training_recs) >= 4:
+        training_recs = training_recs[:4]
+    elif len(training_recs) >= 3:
+        training_recs = training_recs[:3]
+    else:
+        training_recs = training_recs[:len(training_recs)]
+
     # ── WEEKLY SUMMARY (this week vs last week) ───────────────────
     week_start_mon = now - timedelta(days=now.weekday())
     last_week_start = week_start_mon - timedelta(weeks=1)
@@ -1067,6 +1381,8 @@ def compute_stats(activities):
         },
         # Achievements
         "achievements": achievements,
+        # Training recommendations
+        "training_recs": training_recs,
         # Overview extras
         "recent_activities": recent,
         "this_week":  this_week_summary,
