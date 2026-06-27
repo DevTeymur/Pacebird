@@ -3,6 +3,7 @@
 
 # Runtime data — personal data and OAuth tokens, never commit
 data/
+*.db
 
 # Python
 __pycache__/
