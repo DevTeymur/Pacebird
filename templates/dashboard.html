@@ -2,10 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#fc4c02">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Pacebird">
 <title>Pacebird</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/favicon.ico">
+<link rel="manifest" href="/manifest.json">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -69,7 +75,7 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 }
 .tab-btn:hover { color:#1a1a2e; }
 .tab-btn.active { color:#fc4c02; border-bottom-color:#fc4c02; }
-.tab-panel { display:none; }
+.tab-panel { display:none; overflow-x:hidden; }
 .tab-panel.active { display:block; }
 
 /* ── LOADING ── */
@@ -150,10 +156,11 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 .chart-card.wide { grid-column:1/-1; }
 .chart-title { font-size:14px; font-weight:700; margin-bottom:3px; }
 .chart-sub   { font-size:12px; color:#bbb; margin-bottom:16px; }
-.chart-wrap  { position:relative; height:210px; }
+.chart-wrap  { position:relative; height:210px; width:100%; overflow:hidden; }
 .chart-wrap.tall  { height:260px; }
 .chart-wrap.xtall { height:320px; }
 .chart-wrap.scroll { overflow-x:auto; }
+.chart-wrap canvas { max-width:100%; }
 
 /* ── SWEET SPOT ── */
 .sweet-badge { display:inline-block; background:#fc4c02; color:#fff; font-size:10px; font-weight:700; padding:2px 9px; border-radius:8px; margin-left:8px; vertical-align:middle; }
@@ -335,6 +342,178 @@ tbody td { padding:11px 14px; vertical-align:middle; }
 .ach-badge { position:absolute; top:-6px; right:-6px; background:#06d6a0; color:#fff; font-size:9px; font-weight:700; padding:2px 6px; border-radius:8px; }
 
 .footer { text-align:center; padding:32px; font-size:12px; color:#ddd; }
+
+/* ══════════════════════════════════════════════
+   MOBILE RESPONSIVE  ≤ 600px
+══════════════════════════════════════════════ */
+@media (max-width: 600px) {
+
+  /* ── HEADER ── */
+  .header {
+    padding: 10px 16px;
+    gap: 8px;
+  }
+  .header-logo { font-size: 18px; }
+  .btn-sm { display: none; }   /* hide Refresh button – use pull-to-reload or profile sync */
+
+  /* ── TABS ── */
+  .tabs-bar {
+    padding: 0 8px;
+    top: 49px;     /* shorter header */
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .tabs-bar::-webkit-scrollbar { display: none; }
+  .tab-btn {
+    padding: 11px 11px;
+    font-size: 12px;
+    gap: 3px;
+  }
+
+  /* ── MAIN CONTAINER ── */
+  .container { padding: 16px 12px; overflow-x: hidden; }
+  .section-title { margin-top: 22px; }
+
+  /* ── PREVENT ALL CHART OVERFLOW ── */
+  .chart-card { overflow: hidden; min-width: 0; }
+  .chart-grid  { min-width: 0; }
+  .chart-wrap  { width: 100% !important; overflow: hidden; }
+
+  /* Doughnut needs more vertical space when full-width on mobile */
+  .chart-wrap--pie { height: 260px; }
+
+  /* ── STAT CARDS ── */
+  .cards-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .card { padding: 14px 12px; border-radius: 12px; }
+  .card-value { font-size: 20px; }
+
+  /* ── WEEK COMPARE ── */
+  .week-compare { padding: 14px 12px; }
+  .wc-header { grid-template-columns: 1fr 80px 80px 50px; }
+  .wc-row    { grid-template-columns: 1fr 80px 80px 50px; }
+  .wc-cell   { font-size: 14px; }
+  .wc-cell.dim { font-size: 13px; }
+  .wc-row-label { font-size: 12px; }
+
+  /* ── PR CARDS ── */
+  .pr-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pr-card { padding: 14px 12px; }
+  .pr-time { font-size: 20px; }
+
+  /* ── CHART GRID — always 1 col on mobile ── */
+  .chart-grid { grid-template-columns: 1fr; gap: 12px; }
+  .chart-card { padding: 14px 12px; }
+  .chart-wrap { height: 180px; }
+  .chart-wrap.tall  { height: 220px; }
+  .chart-wrap.xtall { height: 260px; }
+
+  /* ── PREDICTOR ── */
+  .predictor-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pred-time { font-size: 20px; }
+
+  /* ── INSIGHT CARDS ── */
+  .insight-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .insight-card { padding: 14px 12px; }
+  .ic-value { font-size: 18px; }
+
+  /* ── STATS TAB ── */
+  .stat-hero { padding: 16px; gap: 14px; }
+  .stat-hero-item .value { font-size: 20px; }
+  .stats-grid { grid-template-columns: 1fr; gap: 8px; }
+  .stat-row { padding: 12px 14px; }
+
+  /* ── ACHIEVEMENTS ── */
+  .ach-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ach-card { padding: 14px 10px; }
+  .ach-icon { font-size: 26px; }
+  .ach-filter { gap: 6px; }
+  .ach-filter-btn { padding: 5px 10px; font-size: 11px; }
+
+  /* ── TIME-OF-DAY ── */
+  .tod-best { padding: 14px 16px; gap: 12px; }
+  .tod-icon { font-size: 26px; }
+  .tod-value { font-size: 16px; }
+
+  /* ── HEATMAP ── */
+  .hm-cell { width: 11px; height: 11px; }
+  .hm-leg-cell { width: 11px; height: 11px; }
+
+  /* ── ACTIVITIES TABLE ── */
+  .tbl-toolbar { gap: 6px; }
+  .tbl-search { font-size: 12px; min-width: 120px; }
+  .tbl-select { font-size: 12px; padding: 7px 8px; }
+  .tbl-range-group { display: none; }   /* hide date range on very small screens */
+
+  /* Hide less-important table columns on mobile */
+  table thead th:nth-child(4),   /* elevation */
+  table thead th:nth-child(5),   /* heart rate */
+  table thead th:nth-child(6),   /* weather (if shown) */
+  table tbody td:nth-child(4),
+  table tbody td:nth-child(5),
+  table tbody td:nth-child(6) { display: none; }
+
+  .tbl-pagination { flex-direction: column; gap: 8px; align-items: center; }
+
+  /* ── SHARE FAB ── */
+  .share-fab {
+    bottom: 16px; right: 16px;
+    padding: 11px 16px;
+    font-size: 13px;
+  }
+
+  /* ── SHARE MODAL ── */
+  .modal { padding: 24px 20px; border-radius: 16px; }
+
+  /* ── ACTIVITY DETAIL MODAL ── */
+  .act-modal-overlay { padding: 0; align-items: flex-end; }
+  .act-modal {
+    border-radius: 20px 20px 0 0;
+    max-width: 100%;
+    max-height: 95vh;
+    grid-template-columns: 1fr;
+  }
+  .act-map { min-height: 200px; height: 200px; }
+  .act-map-inner { min-height: 200px; height: 200px; }
+  .act-map-placeholder { min-height: 200px; }
+  .act-detail { padding: 18px 16px; max-height: calc(95vh - 200px); }
+  .act-stats-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .act-stat-value { font-size: 15px; }
+  .act-name { font-size: 16px; }
+
+  /* ── ENRICH BAR ── */
+  .enrich-bar-wrap { padding: 10px 12px; }
+
+  /* ── DEMO BANNER ── */
+  #dataRangeBanner { padding: 8px 12px; }
+
+  /* ── YEAR LEGEND ── */
+  .year-colors { gap: 8px; }
+  .year-dot { font-size: 11px; }
+
+  /* ── SWEET BADGE ── */
+  .sweet-badge { font-size: 9px; padding: 1px 6px; }
+
+  /* ── PROFILE CARD ── */
+  .profile-card { right: 0; min-width: 230px; }
+
+  /* ── FOOTER ── */
+  .footer { padding: 20px; }
+}
+
+/* Mid-range: 601–900px — 2-col charts still fine, just tighten padding */
+@media (min-width: 601px) and (max-width: 900px) {
+  .header { padding: 12px 20px; }
+  .container { padding: 20px 16px; }
+  .tabs-bar { padding: 0 16px; }
+  .cards-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .wc-header { grid-template-columns: 1fr 100px 100px 55px; }
+  .wc-row    { grid-template-columns: 1fr 100px 100px 55px; }
+  .stat-hero { padding: 18px 20px; }
+  .act-modal { max-width: 700px; }
+}
 </style>
 </head>
 <body>
@@ -446,7 +625,7 @@ tbody td { padding:11px 14px; vertical-align:middle; }
       <div class="chart-card">
         <div class="chart-title">Sessions by Sport</div>
         <div class="chart-sub">Click a segment to filter the Activities table</div>
-        <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
+        <div class="chart-wrap chart-wrap--pie"><canvas id="pieChart"></canvas></div>
       </div>
       <div class="chart-card">
         <div class="chart-title">Calories Burned per Hour</div>
