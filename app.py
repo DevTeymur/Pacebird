@@ -274,6 +274,15 @@ def favicon_svg():
     return svg, 200, {"Content-Type": "image/svg+xml", "Cache-Control": "public,max-age=86400"}
 
 
+@app.route("/manifest.json")
+def pwa_manifest():
+    import os as _os
+    manifest_path = _os.path.join(_os.path.dirname(__file__), "static", "manifest.json")
+    with open(manifest_path) as f:
+        data = f.read()
+    return data, 200, {"Content-Type": "application/manifest+json", "Cache-Control": "public,max-age=3600"}
+
+
 @app.route("/api/debug")
 def api_debug():
     if "access_token" not in session:
